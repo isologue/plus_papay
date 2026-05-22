@@ -1,0 +1,81 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: plus-papay-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_DATABASE: ${DB_NAME:-plus_papay}
+      MYSQL_USER: ${DB_USER:-papay}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change_me_app_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root_password}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: plus-papay-app
+    restart: unless-stopped
+    init: true
+    shm_size: 1gb
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      NODE_ENV: production
+      PORT: 3000
+      JSON_BODY_LIMIT: ${JSON_BODY_LIMIT:-15mb}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-papay}
+      DB_PASSWORD: ${DB_PASSWORD:-change_me_app_password}
+      DB_NAME: ${DB_NAME:-plus_papay}
+      DB_POOL_LIMIT: ${DB_POOL_LIMIT:-60}
+      ASSET_LOCK_STALE_MS: ${ASSET_LOCK_STALE_MS:-900000}
+      HEADFUL: ${HEADFUL:-0}
+      CHROMIUM_CHANNEL: ${CHROMIUM_CHANNEL:-}
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      CHATGPT_TOKEN: ${CHATGPT_TOKEN:-}
+      STRIPE_KEY: ${STRIPE_KEY:-}
+      BILLING_COUNTRY: ${BILLING_COUNTRY:-US}
+      BILLING_ADDRESS: ${BILLING_ADDRESS:-}
+      BILLING_CITY: ${BILLING_CITY:-}
+      BILLING_STATE: ${BILLING_STATE:-}
+      BILLING_ZIP: ${BILLING_ZIP:-}
+      BILLING_NAME: ${BILLING_NAME:-}
+      BILLING_EMAIL: ${BILLING_EMAIL:-}
+      BILLING_PHONE: ${BILLING_PHONE:-}
+      PAYPAL_PASSWORD: ${PAYPAL_PASSWORD:-}
+      CARD_NUMBER: ${CARD_NUMBER:-}
+      CARD_EXPIRY: ${CARD_EXPIRY:-}
+      CARD_CVC: ${CARD_CVC:-}
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      PROXY: ${PROXY:-}
+      EMAIL_SOURCE: ${EMAIL_SOURCE:-}
+      INBOX_JWT: ${INBOX_JWT:-}
+      INBOX_API_BASE: ${INBOX_API_BASE:-}
+      INBOX_EMAIL_DOMAINS: ${INBOX_EMAIL_DOMAINS:-}
+      RANDOM_EMAIL_DOMAIN: ${RANDOM_EMAIL_DOMAIN:-}
+      IMAP_ADMIN_PASSWORD: ${IMAP_ADMIN_PASSWORD:-}
+    volumes:
+      - ./product_files:/app/product_files
+      - ./debug_screenshots:/app/debug_screenshots
+
+volumes:
+  mysql_data:
