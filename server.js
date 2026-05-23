@@ -954,6 +954,32 @@ function decodeJwtPart(part) {
     return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
 }
 
+function parseAccessTokenClaims(token) {
+    const value = String(token || '').trim();
+    if (!value) {
+        return null;
+    }
+
+    const parts = value.split('.');
+    if (parts.length !== 3 || parts.some((item) => !item)) {
+        return null;
+    }
+
+    try {
+        const header = decodeJwtPart(parts[0]);
+        const payload = decodeJwtPart(parts[1]);
+        return {
+            value,
+            header,
+            payload,
+            authInfo: payload['https://api.openai.com/auth'] || {},
+            profile: payload['https://api.openai.com/profile'] || {}
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
 function validateAccessToken(token) {
     const value = String(token || '').trim();
     if (!value) {
@@ -1011,6 +1037,94 @@ function validateAccessToken(token) {
     }
 
     return { valid: true };
+}
+
+function formatCpaDownloadTimestamp(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+    ].join('-') + '_' + [
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds())
+    ].join('-');
+}
+
+function buildFreeAccountCpaFileName(email, date = new Date()) {
+    const safeEmail = sanitizeExportFileName(String(email || '').trim()) || 'free-account';
+    return `${safeEmail}.cpa.${formatCpaDownloadTimestamp(date)}.json`;
+}
+
+function buildSyntheticCpaIdToken({ email, exp, chatgptAccountId, chatgptPlanType, chatgptUserId, userId }) {
+    const encodedHeader = encodeBase64Url(JSON.stringify({
+        alg: 'none',
+        typ: 'JWT',
+        cpa_synthetic: true
+    }));
+    const encodedPayload = encodeBase64Url(JSON.stringify({
+        iat: Math.floor(Date.now() / 1000),
+        exp,
+        'https://api.openai.com/auth': {
+            chatgpt_account_id: chatgptAccountId,
+            chatgpt_plan_type: chatgptPlanType,
+            chatgpt_user_id: chatgptUserId,
+            user_id: userId
+        },
+        email
+    }));
+    return `${encodedHeader}.${encodedPayload}.synthetic`;
+}
+
+function buildFreeAccountCpaPayload(poolEmail) {
+    const claims = parseAccessTokenClaims(poolEmail?.accessToken || '');
+    if (!claims) {
+        throw new Error('Access Token 格式无效，无法导出 CPA JSON');
+    }
+
+    const { payload, authInfo, profile, value } = claims;
+    const rawAuth = poolEmail?.auth || {};
+    const email = String(poolEmail?.email || profile.email || '').trim();
+    const chatgptAccountId = String(authInfo.chatgpt_account_id || '').trim();
+    const chatgptUserId = String(authInfo.chatgpt_user_id || authInfo.user_id || '').trim();
+    const userId = String(authInfo.user_id || authInfo.chatgpt_user_id || '').trim();
+    const chatgptPlanType = String(authInfo.chatgpt_plan_type || 'free').trim() || 'free';
+    const exp = Number(payload.exp || 0);
+
+    if (!email) {
+        throw new Error('账号缺少邮箱信息，无法导出 CPA JSON');
+    }
+    if (!chatgptAccountId || !chatgptUserId || !userId) {
+        throw new Error('Access Token 缺少账号声明，无法导出 CPA JSON');
+    }
+    if (!Number.isFinite(exp) || exp <= 0) {
+        throw new Error('Access Token 缺少过期时间，无法导出 CPA JSON');
+    }
+
+    return {
+        type: 'codex',
+        account_id: chatgptAccountId,
+        chatgpt_account_id: chatgptAccountId,
+        email,
+        name: email,
+        plan_type: chatgptPlanType,
+        chatgpt_plan_type: chatgptPlanType,
+        id_token: buildSyntheticCpaIdToken({
+            email,
+            exp,
+            chatgptAccountId,
+            chatgptPlanType,
+            chatgptUserId,
+            userId
+        }),
+        id_token_synthetic: true,
+        access_token: value,
+        refresh_token: '',
+        session_token: String(rawAuth.sessionToken || rawAuth.session_token || rawAuth.session_id || '').trim(),
+        last_refresh: new Date(poolEmail?.tokenUpdatedAt || poolEmail?.registeredAt || Date.now()).toISOString(),
+        expired: new Date(exp * 1000).toISOString()
+    };
 }
 
 function encodeBase64Url(input) {
@@ -1839,6 +1953,27 @@ app.post('/api/admin/free-accounts/:id/refresh-token', authenticateAdmin, async 
             workerCount: 1,
             message: `已启动 ${row.email} 的 Token 补充流程`
         });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/free-accounts/:id/cpa', authenticateAdmin, async (req, res) => {
+    const poolEmailId = Number(req.params.id) || 0;
+    try {
+        await ensureStoreReady();
+        const row = await store.getPoolEmailCredentials(poolEmailId);
+        if (!row || !row.registered || row.plusRegistered) {
+            return res.status(404).json({ success: false, message: '该免费号不存在或已不在免费号池' });
+        }
+        if (!String(row.accessToken || '').trim()) {
+            return res.status(400).json({ success: false, message: '该免费号缺少 Token，暂时无法下载 CPA JSON' });
+        }
+        const cpaPayload = buildFreeAccountCpaPayload(row);
+        const fileName = buildFreeAccountCpaFileName(row.email);
+        res.setHeader('Content-Disposition', `attachment; filename=${encodeURIComponent(fileName)}`);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.send(JSON.stringify(cpaPayload, null, 2));
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

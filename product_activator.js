@@ -1023,7 +1023,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                 excludePoolEmailIds: Array.from(skippedPoolEmailIds)
             });
             ensureNotStopped();
-            const { email, accessToken } = regResult;
+            const { email, accessToken, sessionAuth } = regResult;
             const poolEmailId = Number(regResult.poolEmailId || 0) || 0;
             let poolReservationHeld = Boolean(regResult.poolReservationHeld && poolEmailId);
             releaseCurrentPoolEmail = async () => {
@@ -1150,7 +1150,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                 if (activationResult.success) {
                     // 🆕 PAYMENT_SUCCESS 立即占位入库（status='待协议'），即使后续 oauth 失败也保留可见记录
                     try {
-                        await store.upsertPendingProduct(email, accessToken);
+                        await store.upsertPendingProduct(email, sessionAuth || accessToken);
                         console.log(`[Product] 💾 Account ${email}: 支付成功已占位入库（status=待协议）`);
                     } catch (insertErr) {
                         console.warn(`[Product] 占位入库失败（不阻塞流程）: ${insertErr.message}`);

@@ -1904,7 +1904,7 @@ async function runRegistrationFlow() {
 
         if (poolEmailId) {
             try {
-                await store.markPoolEmailRegistered(poolEmailId, sessionData.accessToken, {
+                await store.markPoolEmailRegistered(poolEmailId, sessionData, {
                     keepLocked: process.env.POOL_EMAIL_KEEP_LOCKED === '1'
                 });
                 console.log(`[邮箱池] 已标记为已注册 id=${poolEmailId}`);
@@ -1918,6 +1918,7 @@ async function runRegistrationFlow() {
         return {
             email,
             accessToken: sessionData.accessToken,
+            sessionAuth: sessionData,
             emailSource,
             poolEmailId: poolEmailId || 0,
             inboxJwt: inboxJwt || '',

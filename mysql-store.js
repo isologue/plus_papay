@@ -1,4 +1,4 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
@@ -24,7 +24,7 @@ function getPool() {
             database: DB_NAME,
             charset: 'utf8mb4',
             waitForConnections: true,
-            // 10 并发任务 × 每任务最多 3 个子流程同时操作 DB + 后台/前台请求，保守预留 60
+            // 10 骞跺彂浠诲姟 脳 姣忎换鍔℃渶澶?3 涓瓙娴佺▼鍚屾椂鎿嶄綔 DB + 鍚庡彴/鍓嶅彴璇锋眰锛屼繚瀹堥鐣?60
             connectionLimit: Number(process.env.DB_POOL_LIMIT || 60),
             queueLimit: 0,
             namedPlaceholders: false,
@@ -37,7 +37,7 @@ function getPool() {
     return pool;
 }
 
-// 资产占用最长保留时间（ms），超过这个时长仍未释放视为崩溃，自动回收
+// 璧勪骇鍗犵敤鏈€闀夸繚鐣欐椂闂达紙ms锛夛紝瓒呰繃杩欎釜鏃堕暱浠嶆湭閲婃斁瑙嗕负宕╂簝锛岃嚜鍔ㄥ洖鏀?
 const ASSET_LOCK_STALE_MS = Number(process.env.ASSET_LOCK_STALE_MS || 15 * 60 * 1000);
 
 function createPasswordHash(password) {
@@ -54,7 +54,7 @@ async function runQuery(sql, params = [], options = {}) {
         return rows;
     } catch (error) {
         const detail = error && error.message ? error.message : String(error);
-        throw new Error(`MySQL 执行失败: ${detail}`);
+        throw new Error(`MySQL 鎵ц澶辫触: ${detail}`);
     }
 }
 
@@ -66,7 +66,7 @@ async function runExecute(sql, params = [], options = {}) {
         return result;
     } catch (error) {
         const detail = error && error.message ? error.message : String(error);
-        throw new Error(`MySQL 执行失败: ${detail}`);
+        throw new Error(`MySQL 鎵ц澶辫触: ${detail}`);
     }
 }
 
@@ -110,6 +110,48 @@ function normalizeCardPool(cardPool) {
 
 function normalizeCdks(cdks) {
     return [...new Set((cdks || []).filter(Boolean).map((item) => String(item).trim()))];
+}
+
+function parseStoredAuthJson(value) {
+    const text = String(value || '').trim();
+    if (!text) {
+        return null;
+    }
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return null;
+    }
+}
+
+function normalizeSessionAuthValue(authValue) {
+    if (!authValue) {
+        return { authJson: '', accessToken: '' };
+    }
+
+    if (typeof authValue === 'object') {
+        const authJson = JSON.stringify(authValue);
+        const accessToken = String(authValue.accessToken || authValue.access_token || '').trim();
+        return { authJson, accessToken };
+    }
+
+    const text = String(authValue).trim();
+    if (!text) {
+        return { authJson: '', accessToken: '' };
+    }
+
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') {
+            const authJson = JSON.stringify(parsed);
+            const accessToken = String(parsed.accessToken || parsed.access_token || '').trim();
+            return { authJson, accessToken };
+        }
+    } catch (_) {
+        /* plain access token string */
+    }
+
+    return { authJson: '', accessToken: text };
 }
 
 async function initializeBaseData() {
@@ -166,7 +208,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('phone_assets', 'usage_count', 'INT NOT NULL DEFAULT 0');
     await ensureColumn('phone_assets', 'sort_order', 'INT NOT NULL DEFAULT 0');
     await ensureColumn('phone_assets', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
-    await ensureColumn('phone_assets', 'status', "VARCHAR(32) NOT NULL DEFAULT '正常'");
+    await ensureColumn('phone_assets', 'status', "VARCHAR(32) NOT NULL DEFAULT '姝ｅ父'");
     await ensureColumn('phone_assets', 'in_use', 'TINYINT(1) NOT NULL DEFAULT 0');
     await ensureColumn('phone_assets', 'locked_at', 'TIMESTAMP NULL DEFAULT NULL');
     await ensureColumn('phone_assets', 'locked_by', 'VARCHAR(64) NULL DEFAULT NULL');
@@ -178,7 +220,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('card_assets', 'usage_count', 'INT NOT NULL DEFAULT 0');
     await ensureColumn('card_assets', 'sort_order', 'INT NOT NULL DEFAULT 0');
     await ensureColumn('card_assets', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
-    await ensureColumn('card_assets', 'status', "VARCHAR(32) NOT NULL DEFAULT '正常'");
+    await ensureColumn('card_assets', 'status', "VARCHAR(32) NOT NULL DEFAULT '姝ｅ父'");
     await ensureColumn('card_assets', 'in_use', 'TINYINT(1) NOT NULL DEFAULT 0');
     await ensureColumn('card_assets', 'locked_at', 'TIMESTAMP NULL DEFAULT NULL');
     await ensureColumn('card_assets', 'locked_by', 'VARCHAR(64) NULL DEFAULT NULL');
@@ -190,7 +232,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('cdk_codes', 'used_at', 'TIMESTAMP NULL DEFAULT NULL');
     await ensureColumn('cdk_codes', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
     await ensureColumn('cdk_codes', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
-    await ensureColumn('cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '自助'");
+    await ensureColumn('cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '鑷姪'");
 
     await ensureColumn('task_logs', 'token_preview', "VARCHAR(64) NOT NULL DEFAULT ''");
     await ensureColumn('task_logs', 'phone', 'VARCHAR(32) NULL');
@@ -208,6 +250,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('pool_emails', 'client_id', "VARCHAR(128) NOT NULL DEFAULT ''");
     await ensureColumn('pool_emails', 'refresh_token', 'TEXT NULL');
     await ensureColumn('pool_emails', 'access_token', 'TEXT NULL');
+    await ensureColumn('pool_emails', 'auth_json', 'TEXT NULL');
     await ensureColumn('pool_emails', 'token_updated_at', 'TIMESTAMP NULL DEFAULT NULL');
     await ensureColumn('pool_emails', 'plus_registered', 'TINYINT(1) NOT NULL DEFAULT 0');
     await ensureColumn('pool_emails', 'plus_registered_at', 'TIMESTAMP NULL DEFAULT NULL');
@@ -215,8 +258,9 @@ async function ensureLegacyColumns() {
     await ensureColumn('product_assets', 'imap_key', 'VARCHAR(64) NULL');
     await ensureColumn('product_assets', 'claimed_cdk', 'VARCHAR(32) NULL');
     await ensureColumn('product_assets', 'token', 'TEXT NULL');
+    await ensureColumn('product_assets', 'auth_json', 'TEXT NULL');
     await ensureColumn('product_assets', 'file_path', 'VARCHAR(512) NULL');
-    await ensureColumn('product_assets', 'status', "VARCHAR(32) NOT NULL DEFAULT '正常'");
+    await ensureColumn('product_assets', 'status', "VARCHAR(32) NOT NULL DEFAULT '姝ｅ父'");
     await ensureColumn('product_assets', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
     await ensureColumn('product_assets', 'shipped', 'TINYINT(1) NOT NULL DEFAULT 0');
     await ensureColumn('product_assets', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
@@ -285,11 +329,11 @@ function isResumableProductGenerationTask(task) {
     }
 
     const message = String(task.lastError || '');
-    return message.includes('系统维护中')
-        || message.includes('余额不足')
-        || message.includes('代理')
-        || message.includes('无法获取有效的 Access Token')
-        || message.includes('页面仍无法正常显示');
+    return message.includes('system maintenance')
+        || message.includes('balance')
+        || message.includes('proxy')
+        || message.includes('Access Token')
+        || message.includes('page still unavailable');
 }
 
 async function getResumableAdminProductGeneration() {
@@ -441,12 +485,12 @@ async function getAdminData() {
             cdk_used: Number(cdkStats.used_count || 0),
             cdk_unused: Number(cdkStats.unused_count || 0),
             product_total: (await runQuery(`SELECT COUNT(*) AS count FROM product_assets`))[0]?.count || 0,
-            product_disabled: (await runQuery(`SELECT COUNT(*) AS count FROM product_assets WHERE status = '封禁'`))[0]?.count || 0,
+            product_disabled: (await runQuery(`SELECT COUNT(*) AS count FROM product_assets WHERE status = '灏佺'`))[0]?.count || 0,
             product_pending: productPendingTotal,
             product_resume_available: Boolean(resumableTask),
             product_resume_count: Number(resumableTask?.remainingCount || 0),
             product_resume_message: resumableTask
-                ? `系统错误中断，剩余 ${resumableTask.remainingCount} 个待继续生产`
+                ? `绯荤粺閿欒涓柇锛屽墿浣?${resumableTask.remainingCount} 涓緟缁х画鐢熶骇`
                 : '',
             product_resume_job_key: resumableTask?.jobKey || ''
         },
@@ -455,9 +499,9 @@ async function getAdminData() {
             return {
                 id: row.job_key,
                 time: row.display_time,
-                token: isAdminProductGeneration ? '系统生成' : row.token_preview,
-                cdk: isAdminProductGeneration ? '系统生成' : (row.cdk_code || ''),
-                type: isAdminProductGeneration ? '成品生产' : (row.cdk_type || '自助'),
+                token: isAdminProductGeneration ? '绯荤粺鐢熸垚' : row.token_preview,
+                cdk: isAdminProductGeneration ? '绯荤粺鐢熸垚' : (row.cdk_code || ''),
+                type: isAdminProductGeneration ? '鎴愬搧鐢熶骇' : (row.cdk_type || '鑷姪'),
                 phone: row.phone,
                 message: row.message || '',
                 cardLast4: row.card_last4 || '',
@@ -477,7 +521,7 @@ async function saveConfig(config) {
     const emailSource = ['random', 'pool', 'inbox'].includes(String(config?.email_source))
         ? String(config.email_source)
         : (config?.pool_email_enabled ? 'pool' : 'random');
-    // 兼容旧字段：email_source 是真相，pool_email_enabled 由它派生
+    // 鍏煎鏃у瓧娈碉細email_source 鏄湡鐩革紝pool_email_enabled 鐢卞畠娲剧敓
     const poolEmailEnabled = emailSource === 'pool' ? '1' : '0';
     const poolEmailImapHost = String(config?.pool_email_imap_host || 'outlook.office365.com').trim() || 'outlook.office365.com';
     const poolEmailIncludeJunk = config?.pool_email_include_junk === false || String(config?.pool_email_include_junk || '1') === '0'
@@ -491,7 +535,7 @@ async function saveConfig(config) {
     const inboxApiBase = String(config?.inbox_api_base || 'https://temp-email-api.jzqkwl.com')
         .trim().replace(/\/+$/, '') || 'https://temp-email-api.jzqkwl.com';
     const inboxEmailDomain = String(config?.inbox_email_domain || '').trim().replace(/^@/, '').toLowerCase();
-    // 多域名（一行一个 / 逗号 / 空格分隔）
+    // 澶氬煙鍚嶏紙涓€琛屼竴涓?/ 閫楀彿 / 绌烘牸鍒嗛殧锛?
     const inboxEmailDomainsList = (() => {
         const raw = config?.inbox_email_domains;
         if (Array.isArray(raw)) {
@@ -607,7 +651,7 @@ async function listCdks() {
         status: runningSet.has(String(row.cdk_code || '').trim())
             ? 'processing'
             : (row.used_at ? 'used' : 'unused'),
-        type: row.type || '自助',
+        type: row.type || '鑷姪',
         shipped: Boolean(row.shipped_at),
         shipped_at: row.shipped_at
             ? new Date(row.shipped_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
@@ -638,8 +682,8 @@ async function insertCdks(cdks, options = {}) {
         };
     }
 
-    const values = normalized.map((cdk) => [cdk, 1, options.type || '自助']);
-    console.log(`正在插入 ${values.length} 个 CDK, 类型: ${options.type || '自助'}`);
+    const values = normalized.map((cdk) => [cdk, 1, options.type || '鑷姪']);
+    console.log(`姝ｅ湪鎻掑叆 ${values.length} 涓?CDK, 绫诲瀷: ${options.type || '鑷姪'}`);
 
     const [result] = await getPool().query(
         `INSERT INTO cdk_codes (cdk_code, is_active, type) VALUES ?`,
@@ -647,7 +691,7 @@ async function insertCdks(cdks, options = {}) {
     );
 
     const insertedCount = Number(result?.affectedRows || 0);
-    console.log(`插入完成, 影响行数: ${insertedCount}`);
+    console.log(`鎻掑叆瀹屾垚, 褰卞搷琛屾暟: ${insertedCount}`);
 
     return {
         insertedCount,
@@ -684,7 +728,7 @@ async function verifyCdkDetails(cdk) {
 }
 
 async function recordCdkFailure(cdk) {
-    // 增加失败次数
+    // 澧炲姞澶辫触娆℃暟
     await runExecute(
         `UPDATE cdk_codes 
          SET fail_count = fail_count + 1 
@@ -692,10 +736,10 @@ async function recordCdkFailure(cdk) {
         [String(cdk)]
     );
 
-    // 检查是否达到 3 次
+    // 妫€鏌ユ槸鍚﹁揪鍒?3 娆?
     const cdkDetails = await verifyCdkDetails(cdk);
     if (cdkDetails && cdkDetails.fail_count >= 3) {
-        // 达到 3 次，设置 10 分钟冷却，并重置失败次数
+        // 杈惧埌 3 娆★紝璁剧疆 10 鍒嗛挓鍐峰嵈锛屽苟閲嶇疆澶辫触娆℃暟
         await runExecute(
             `UPDATE cdk_codes 
              SET cooldown_until = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 10 MINUTE),
@@ -703,7 +747,7 @@ async function recordCdkFailure(cdk) {
              WHERE cdk_code = ?`,
             [String(cdk)]
         );
-        return true; // 触发了冷却
+        return true; // 瑙﹀彂浜嗗喎鍗?
     }
     return false;
 }
@@ -791,7 +835,7 @@ async function deletePhoneAsset(phone) {
     await runExecute(
         `UPDATE phone_assets
          SET is_active = 0,
-             status = '已报废'
+             status = '宸叉姤搴?
          WHERE phone = ?`,
         [String(phone)]
     );
@@ -805,14 +849,14 @@ async function deleteCardAsset(cardNumber) {
     await runExecute(
         `UPDATE card_assets
          SET is_active = 0,
-             status = '已报废'
+             status = '宸叉姤搴?
          WHERE card_number = ?`,
         [String(cardNumber)]
     );
 }
 
-// 在事务里挑一个未占用资产并立即标记 in_use；无可用资产时返回 null 而不是阻塞。
-// 用 FOR UPDATE SKIP LOCKED 避免两个并发任务同时抢同一行。
+// 鍦ㄤ簨鍔￠噷鎸戜竴涓湭鍗犵敤璧勪骇骞剁珛鍗虫爣璁?in_use锛涙棤鍙敤璧勪骇鏃惰繑鍥?null 鑰屼笉鏄樆濉炪€?
+// 鐢?FOR UPDATE SKIP LOCKED 閬垮厤涓や釜骞跺彂浠诲姟鍚屾椂鎶㈠悓涓€琛屻€?
 async function reserveAssetRow(connection, table, columns, ownerKey) {
     const staleThreshold = new Date(Date.now() - ASSET_LOCK_STALE_MS);
     const colList = ['id', ...columns].join(', ');
@@ -866,7 +910,7 @@ async function reserveRuntimeAssets(ownerKey = '') {
                     key: phoneRow.sms_api_key,
                     usage_count: Number(phoneRow.usage_count || 0)
                 }
-                : { phone: '未配置', key: '', usage_count: 0 },
+                : { phone: 'unconfigured', key: '', usage_count: 0 },
             card: cardRow
                 ? {
                     number: cardRow.card_number,
@@ -903,7 +947,7 @@ async function releaseRuntimeAssets({ phoneAssetId, cardAssetId } = {}) {
     }
 }
 
-// 兜底：把超过 ASSET_LOCK_STALE_MS 仍未释放的锁强制清理（任务进程崩溃后回收用）
+// 鍏滃簳锛氭妸瓒呰繃 ASSET_LOCK_STALE_MS 浠嶆湭閲婃斁鐨勯攣寮哄埗娓呯悊锛堜换鍔¤繘绋嬪穿婧冨悗鍥炴敹鐢級
 async function releaseStaleAssetLocks() {
     const staleThreshold = new Date(Date.now() - ASSET_LOCK_STALE_MS);
     const [phoneResult, cardResult, poolResult] = await Promise.all([
@@ -936,7 +980,7 @@ async function releaseStaleAssetLocks() {
     };
 }
 
-// 启动时先把所有 in_use 标记彻底重置（崩溃重启场景）
+// 鍚姩鏃跺厛鎶婃墍鏈?in_use 鏍囪褰诲簳閲嶇疆锛堝穿婧冮噸鍚満鏅級
 async function resetAllAssetLocks() {
     await Promise.all([
         runExecute(`UPDATE phone_assets SET in_use = 0, locked_at = NULL, locked_by = NULL WHERE in_use = 1`),
@@ -945,9 +989,9 @@ async function resetAllAssetLocks() {
     ]);
 }
 
-// 支持两种格式：
+// 鏀寔涓ょ鏍煎紡锛?
 //   1) Outlook/MS OAuth2:  email----password----client_id----refresh_token
-//   2) 简单密码:            email\tpassword   或   email password
+//   2) 绠€鍗曞瘑鐮?            email\tpassword   鎴?  email password
 function parseMailTxtImport(text) {
     const lines = String(text || '').split(/\r?\n/);
     const out = [];
@@ -1037,7 +1081,7 @@ async function listPoolEmails() {
         `SELECT id, email,
                 CASE WHEN LENGTH(TRIM(password)) > 0 THEN 1 ELSE 0 END AS has_password,
                 CASE WHEN refresh_token IS NOT NULL AND LENGTH(TRIM(refresh_token)) > 0 THEN 1 ELSE 0 END AS has_oauth,
-                CASE WHEN access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 1 ELSE 0 END AS has_access_token,
+                access_token, auth_json,
                 registered, registered_at, plus_registered, plus_registered_at, in_use, locked_at, is_active, created_at
          FROM pool_emails
          WHERE is_active = 1
@@ -1049,7 +1093,7 @@ async function listPoolEmails() {
         email: row.email,
         has_password: Number(row.has_password || 0) === 1,
         has_oauth: Number(row.has_oauth || 0) === 1,
-        has_access_token: Number(row.has_access_token || 0) === 1,
+        has_access_token: Boolean(String(row.access_token || '').trim() || String(parseStoredAuthJson(row.auth_json)?.accessToken || '').trim()),
         registered: Number(row.registered || 0) === 1,
         registered_at: row.registered_at,
         plus_registered: Number(row.plus_registered || 0) === 1,
@@ -1062,8 +1106,7 @@ async function listPoolEmails() {
 
 async function listFreePoolAccounts() {
     const rows = await runQuery(
-        `SELECT id, email,
-                CASE WHEN access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 1 ELSE 0 END AS has_access_token,
+        `SELECT id, email, access_token, auth_json,
                 registered_at, token_updated_at, in_use, locked_at, created_at
          FROM pool_emails
          WHERE is_active = 1
@@ -1075,7 +1118,7 @@ async function listFreePoolAccounts() {
     return rows.map((row) => ({
         id: row.id,
         email: row.email,
-        has_access_token: Number(row.has_access_token || 0) === 1,
+        has_access_token: Boolean(String(row.access_token || '').trim() || String(parseStoredAuthJson(row.auth_json)?.accessToken || '').trim()),
         registered_at: row.registered_at,
         token_updated_at: row.token_updated_at,
         in_use: Number(row.in_use || 0) === 1,
@@ -1086,7 +1129,8 @@ async function listFreePoolAccounts() {
 
 async function getPoolEmailCredentials(id) {
     const rows = await runQuery(
-        `SELECT id, email, password, client_id, refresh_token, access_token, registered, plus_registered, is_active
+        `SELECT id, email, password, client_id, refresh_token, access_token, auth_json,
+                token_updated_at, registered, registered_at, plus_registered, plus_registered_at, is_active
          FROM pool_emails
          WHERE id = ?
          LIMIT 1`,
@@ -1104,9 +1148,14 @@ async function getPoolEmailCredentials(id) {
         password: row.password || '',
         clientId: row.client_id || '',
         refreshToken: row.refresh_token || '',
-        accessToken: row.access_token || '',
+        accessToken: String(row.access_token || '').trim() || String(parseStoredAuthJson(row.auth_json)?.accessToken || '').trim(),
+        authJson: row.auth_json || '',
+        auth: parseStoredAuthJson(row.auth_json),
+        tokenUpdatedAt: row.token_updated_at,
         registered: Number(row.registered || 0) === 1,
-        plusRegistered: Number(row.plus_registered || 0) === 1
+        registeredAt: row.registered_at,
+        plusRegistered: Number(row.plus_registered || 0) === 1,
+        plusRegisteredAt: row.plus_registered_at
     };
 }
 
@@ -1156,7 +1205,7 @@ async function reservePoolEmail(ownerKey = '', options = {}) {
             ? 'id ASC'
             : `CASE ${priorityCases.join(' ')} ELSE 9 END, id ASC`;
         const [rows] = await connection.query(
-            `SELECT id, email, password, client_id, refresh_token, access_token, registered, plus_registered
+            `SELECT id, email, password, client_id, refresh_token, access_token, auth_json, registered, plus_registered
              FROM pool_emails
              WHERE is_active = 1
                AND plus_registered = 0
@@ -1187,7 +1236,9 @@ async function reservePoolEmail(ownerKey = '', options = {}) {
             password: row.password || '',
             clientId: row.client_id || '',
             refreshToken: row.refresh_token || '',
-            accessToken: row.access_token || '',
+            accessToken: String(row.access_token || '').trim() || String(parseStoredAuthJson(row.auth_json)?.accessToken || '').trim(),
+            authJson: row.auth_json || '',
+            auth: parseStoredAuthJson(row.auth_json),
             registered: Number(row.registered || 0) === 1,
             plusRegistered: Number(row.plus_registered || 0) === 1
         };
@@ -1208,24 +1259,27 @@ async function releasePoolEmailReservation(id) {
     );
 }
 
-async function markPoolEmailRegistered(id, accessToken = '', options = {}) {
+async function markPoolEmailRegistered(id, authValue = '', options = {}) {
     if (!id) {
         return;
     }
 
     const keepLocked = Boolean(options.keepLocked);
-    const token = String(accessToken || '').trim();
+    const normalizedAuth = normalizeSessionAuthValue(authValue);
+    const token = String(normalizedAuth.accessToken || '').trim();
+    const authJson = String(normalizedAuth.authJson || '').trim();
     await runExecute(
         `UPDATE pool_emails
          SET registered = 1,
              registered_at = COALESCE(registered_at, CURRENT_TIMESTAMP),
              access_token = CASE WHEN ? <> '' THEN ? ELSE access_token END,
+             auth_json = CASE WHEN ? <> '' THEN ? ELSE auth_json END,
              token_updated_at = CASE WHEN ? <> '' THEN CURRENT_TIMESTAMP ELSE token_updated_at END,
              in_use = CASE WHEN ? = 1 THEN in_use ELSE 0 END,
              locked_at = CASE WHEN ? = 1 THEN locked_at ELSE NULL END,
              locked_by = CASE WHEN ? = 1 THEN locked_by ELSE NULL END
          WHERE id = ?`,
-        [token, token, token, keepLocked ? 1 : 0, keepLocked ? 1 : 0, keepLocked ? 1 : 0, Number(id)]
+        [token, token, authJson, authJson, token, keepLocked ? 1 : 0, keepLocked ? 1 : 0, keepLocked ? 1 : 0, Number(id)]
     );
 }
 
@@ -1247,7 +1301,7 @@ async function markPoolEmailPlusRegisteredByEmail(email) {
     );
 }
 
-// 把 {session} 占位符替换成随机字符串，便于 Kookeey/Brightdata 等住宅代理走 sticky session
+// 鎶?{session} 鍗犱綅绗︽浛鎹㈡垚闅忔満瀛楃涓诧紝渚夸簬 Kookeey/Brightdata 绛変綇瀹呬唬鐞嗚蛋 sticky session
 function substituteProxySession(rawProxy) {
     if (!rawProxy) {
         return rawProxy;
@@ -1259,8 +1313,8 @@ function substituteProxySession(rawProxy) {
     return rawProxy.replace(/\{session\}/gi, sid);
 }
 
-// 只取代理，不占用手机/卡资产；适合注册/协议提取这种只用代理的子流程
-// 支持 {session} 占位符；每次调用替换为新的随机 sticky session ID
+// 鍙彇浠ｇ悊锛屼笉鍗犵敤鎵嬫満/鍗¤祫浜э紱閫傚悎娉ㄥ唽/鍗忚鎻愬彇杩欑鍙敤浠ｇ悊鐨勫瓙娴佺▼
+// 鏀寔 {session} 鍗犱綅绗︼紱姣忔璋冪敤鏇挎崲涓烘柊鐨勯殢鏈?sticky session ID
 async function getActiveProxy() {
     const rows = await runQuery(
         `SELECT config_value FROM app_config WHERE config_key = ? LIMIT 1`,
@@ -1277,7 +1331,7 @@ async function getActiveProxy() {
     return substituteProxySession(picked);
 }
 
-// 兼容旧调用：仅返回代理 + 资源快照，不再锁定（防止误用阻塞资产池）
+// 鍏煎鏃ц皟鐢細浠呰繑鍥炰唬鐞?+ 璧勬簮蹇収锛屼笉鍐嶉攣瀹氾紙闃叉璇敤闃诲璧勪骇姹狅級
 async function getRuntimeAssets() {
     const [phoneRows, cardRows, proxy] = await Promise.all([
         runQuery(
@@ -1302,7 +1356,7 @@ async function getRuntimeAssets() {
     return {
         phone: phoneRow
             ? { phone: phoneRow.phone, key: phoneRow.sms_api_key, usage_count: Number(phoneRow.usage_count || 0) }
-            : { phone: '未配置', key: '', usage_count: 0 },
+            : { phone: 'unconfigured', key: '', usage_count: 0 },
         card: cardRow
             ? { number: cardRow.card_number, expiry: cardRow.card_expiry, cvc: cardRow.card_cvc, usage_count: Number(cardRow.usage_count || 0) }
             : { number: '', expiry: '', cvc: '', usage_count: 0 },
@@ -1440,7 +1494,7 @@ async function createTaskLog({ tokenPreview, cdkCode, phone, cardLast4, status, 
     const now = new Date();
     const displayTime = now.toLocaleString('zh-CN', { hour12: false });
     const jobKey = `${now.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
-    const message = String(status) === 'running' ? '正在开通中' : null;
+    const message = String(status) === 'running' ? '姝ｅ湪寮€閫氫腑' : null;
 
     await runExecute(
         `INSERT INTO task_logs (job_key, token_preview, cdk_code, phone, card_last4, status, message, progress, display_time, raw_output)
@@ -1558,26 +1612,28 @@ async function addProduct(email, filePath, password = null, token = null, imapKe
     );
 }
 
-// 支付成功立即入库（占位）：file_path 留空，status='待协议'
-// 后续 oauth_login 拿到 RT 后再调用 markProductReadyByEmail() 升级为 '正常'
-async function upsertPendingProduct(email, accessToken = null) {
+// 鏀粯鎴愬姛绔嬪嵆鍏ュ簱锛堝崰浣嶏級锛歠ile_path 鐣欑┖锛宻tatus='寰呭崗璁?
+// 鍚庣画 oauth_login 鎷垮埌 RT 鍚庡啀璋冪敤 markProductReadyByEmail() 鍗囩骇涓?'姝ｅ父'
+async function upsertPendingProduct(email, authValue = null) {
     if (!email) return;
+    const normalizedAuth = normalizeSessionAuthValue(authValue);
+    const token = String(normalizedAuth.accessToken || '').trim();
+    const authJson = String(normalizedAuth.authJson || '').trim();
     await runExecute(
-        `INSERT INTO product_assets (email, token, status)
-         VALUES (?, ?, '待协议')
-         ON DUPLICATE KEY UPDATE token = COALESCE(VALUES(token), token)`,
-        [String(email), accessToken ? String(accessToken) : null]
+        `INSERT INTO product_assets (email, token, auth_json, status)
+         VALUES (?, ?, ?, 'pending')
+         ON DUPLICATE KEY UPDATE token = COALESCE(VALUES(token), token), auth_json = COALESCE(VALUES(auth_json), auth_json)`,
+        [String(email), token || null, authJson || null]
     );
 }
 
-// 协议提取成功后调用：补 file_path / imap_key，并把状态翻成 '正常'，使其可被 CDK 兑换
 async function markProductReadyByEmail(email, filePath = '', imapKey = null) {
     if (!email) return;
     await runExecute(
         `UPDATE product_assets
          SET file_path = CASE WHEN ? <> '' THEN ? ELSE file_path END,
              imap_key = COALESCE(?, imap_key),
-             status = '正常'
+             status = '姝ｅ父'
          WHERE email = ?`,
         [String(filePath || ''), String(filePath || ''), imapKey ? String(imapKey) : null, String(email)]
     );
@@ -1607,38 +1663,38 @@ async function updateProductStatus(id, status) {
 
 async function claimProductAccount(cdk) {
     return withTransaction(async (connection) => {
-        // 1. 验证 CDK
+        // 1. 楠岃瘉 CDK
         const [cdkRows] = await connection.query(
-            `SELECT * FROM cdk_codes WHERE cdk_code = ? AND is_active = 1 AND used_at IS NULL AND type = '成品' FOR UPDATE`,
+            `SELECT * FROM cdk_codes WHERE cdk_code = ? AND is_active = 1 AND used_at IS NULL AND type = '鎴愬搧' FOR UPDATE`,
             [cdk]
         );
         const cdkData = cdkRows[0];
         if (!cdkData) {
-            throw new Error('CDK 无效、已使用或非成品激活码');
+            throw new Error('CDK 鏃犳晥銆佸凡浣跨敤鎴栭潪鎴愬搧婵€娲荤爜');
         }
 
-        // 2. 查找可用成品账号
+        // 2. 鏌ユ壘鍙敤鎴愬搧璐﹀彿
         const [productRows] = await connection.query(
-            `SELECT * FROM product_assets WHERE shipped = 0 AND status = '正常' ORDER BY id ASC LIMIT 1 FOR UPDATE`
+            `SELECT * FROM product_assets WHERE shipped = 0 AND status = '姝ｅ父' ORDER BY id ASC LIMIT 1 FOR UPDATE`
         );
         const product = productRows[0];
         if (!product) {
-            throw new Error('当前成品号库暂时缺货，请联系客服补充');
+            throw new Error('褰撳墠鎴愬搧鍙峰簱鏆傛椂缂鸿揣锛岃鑱旂郴瀹㈡湇琛ュ厖');
         }
 
-        // 3. 标记 CDK 已使用
+        // 3. 鏍囪 CDK 宸蹭娇鐢?
         await connection.query(
             `UPDATE cdk_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?`,
             [cdkData.id]
         );
 
-        // 4. 标记成品号已出库
+        // 4. 鏍囪鎴愬搧鍙峰凡鍑哄簱
         await connection.query(
             `UPDATE product_assets SET shipped = 1, claimed_cdk = ? WHERE id = ?`,
             [String(cdk), product.id]
         );
 
-        // 5. 创建成功日志
+        // 5. 鍒涘缓鎴愬姛鏃ュ織
         const jobKey = `PROD-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         await connection.query(
             `INSERT INTO task_logs (job_key, token_preview, cdk_code, status, message, progress, display_time)
@@ -1647,7 +1703,7 @@ async function claimProductAccount(cdk) {
                 jobKey,
                 'PRODUCT_CLAIM',
                 cdk,
-                `成品号兑换成功: ${product.email}`,
+                `鎴愬搧鍙峰厬鎹㈡垚鍔? ${product.email}`,
                 new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
             ]
         );
@@ -1714,7 +1770,7 @@ async function getClaimedProductDownloadInfo(cdk) {
     let filePath = '';
     let imapKey = '';
 
-    const messageMatch = message.match(/成品号(?:兑换|创建)成功:\s*(.+)$/);
+    const messageMatch = message.match(/[:：]\s*(.+)$/);
     if (messageMatch) {
         email = String(messageMatch[1] || '').trim();
     }
