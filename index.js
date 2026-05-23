@@ -4,16 +4,16 @@ const ChatGPTService = require('./chatgpt');
 const fs = require('fs');
 const path = require('path');
 chromium.use(StealthPlugin());
-// 鍚敤 Stealth 鎻掍欢锛堝湪浠讳綍 launch 涔嬪墠璋冪敤锛?
+// 启用 Stealth 插件，减少 launch 时的自动化特征
 
-// 闅忔満閫夋嫨涓€涓湡瀹炵殑 Chrome UA
+// 随机选择一个常见 Chrome UA
 
 
 function generateRandomOutlookEmail() {
-    // PayPal 璐︽埛鐧诲綍閭锛氫娇鐢?@hotmail.com锛圥ayPal 瀵逛富娴侀偖绠变俊浠诲害鏇撮珮锛?
-    // 鑷畾涔夊煙鍚嶏紙濡?chiyiyi.cloud锛夊鏄撹 PayPal 鏍囦负鍙枒锛?
+    // PayPal 创建账户阶段更偏好 @hotmail.com，命中率通常比其他别名更稳定
+    // 随机邮箱域名配置留给 chiyiyi.cloud / Inbox 流程，这里只负责 PayPal 邮箱生成
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    const length = 10 + Math.floor(Math.random() * 4); // 10-13 瀛楃锛岄伩鍏嶇煭鍓嶇紑閲嶅椋庨櫓
+    const length = 10 + Math.floor(Math.random() * 4); // 10-13 字符，避免短前缀重复风险
     let prefix = '';
     for (let i = 0; i < length; i += 1) {
         prefix += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -31,8 +31,7 @@ function generateRandomOutlookEmail() {
  * - Modular Flow Control
  */
 
-// 鍏ㄩ儴鏁忔劅閰嶇疆璇烽€氳繃鐜鍙橀噺浼犲叆锛涙湰浠撳簱涓嶉檮甯︿换浣曠湡瀹炲瘑閽?璐﹀彿/浠ｇ悊锛?
-// 鍙弬鑰?.env.example 瀹屾垚鏈湴閰嶇疆鍚庡啀鍚姩銆?
+// 配置项优先读环境变量；缺省值留给本地调试或 .env.example
 const CONFIG = {
     chatgptToken: process.env.CHATGPT_TOKEN || "",
     stripeKey: process.env.STRIPE_KEY || "",
@@ -71,7 +70,7 @@ function buildPlaywrightProxy(proxyValue) {
 
         return proxy;
     } catch (error) {
-        console.warn(`[!] [绯荤粺] 浠ｇ悊 URL 瑙ｆ瀽澶辫触锛屽皢鎸夊師濮嬪€间娇鐢? ${error.message}`);
+        console.warn(`[!] [代理] 代理 URL 解析失败: ${error.message}`);
         return { server: proxyValue };
     }
 }
@@ -93,7 +92,7 @@ function getAvailableDebugPage(context, preferredPage) {
     return alivePages.length ? alivePages[alivePages.length - 1] : null;
 }
 
-async function captureDebugScreenshot(context, preferredPage, prefix, label = '寮傚父鎴浘') {
+async function captureDebugScreenshot(context, preferredPage, prefix, label = '异常截图') {
     const targetPage = getAvailableDebugPage(context, preferredPage);
     if (!targetPage) {
         console.warn(`No available page for ${label} screenshot.`);
@@ -102,8 +101,8 @@ async function captureDebugScreenshot(context, preferredPage, prefix, label = '�
 
     const screenshotPath = buildDebugScreenshotPath(prefix);
     await targetPage.screenshot({ path: screenshotPath, fullPage: true });
-    console.log(`馃摳 [绯荤粺] ${label}宸蹭繚瀛? ${screenshotPath}`);
-    // (闈欓粯) 鎴浘椤甸潰 URL 涓嶅啀鎵撳嵃锛堜俊鎭啑闀匡級
+    console.log(`📸 [系统] ${label}已保存: ${screenshotPath}`);
+    // (静默) 截图页面 URL 不再打印（信息冗长）
     return screenshotPath;
 }
 
@@ -125,7 +124,7 @@ async function recoverConnectionClosed(page, fallbackUrl = '') {
         return false;
     }
 
-    console.warn('[Warn] 妫€娴嬪埌娴忚鍣ㄨ繛鎺ュ叧闂敊璇〉锛屾鍦ㄥ皾璇曡嚜鍔ㄩ噸杞?..');
+    console.warn('[Warn] 检测到断线页面，尝试恢复连接...');
     for (let attempt = 1; attempt <= 3; attempt++) {
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {
             const nextUrl = fallbackUrl || page.url();
@@ -146,9 +145,9 @@ async function recoverConnectionClosed(page, fallbackUrl = '') {
  * Main Automation logic
  */
 async function run() {
-    // 鍒囧埌鏈夊ご妯″紡璋冭瘯锛欻EADFUL=1 node server.js 鎴?HEADFUL=1 node index.js
+    // 切到有头模式调试：HEADFUL=1 node server.js 或 HEADFUL=1 node index.js
     const DEBUG_HEADFUL = process.env.HEADFUL === '1';
-    // 閫夋嫨鐪熷疄 Google Chrome锛欳HROMIUM_CHANNEL=chrome锛堟満鍣ㄩ渶瀹夎 Google Chrome锛?
+    // 选择真实 Google Chrome：CHROMIUM_CHANNEL=chrome（机器需安装 Google Chrome）
     const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
 
     const launchArgs = [
@@ -171,7 +170,7 @@ async function run() {
 
     if (proxyConfig) {
         launchOptions.proxy = proxyConfig;
-        // 浠ｇ悊璇︽儏涓嶅啀鎵撳嵃锛堥伩鍏嶆硠闇插嚟璇?+ 鍑忓皯鍣煶锛?
+        // 代理详情不再打印（避免泄露凭据，减少噪音）
         const _proxyHost = (() => {
             try { return new URL(CONFIG.proxy).host; } catch (_) { return 'configured'; }
         })();
@@ -180,7 +179,7 @@ async function run() {
 
     const browser = await chromium.launch(launchOptions);
 
-    // 鍙栨祻瑙堝櫒鐪熷疄 UA锛岄伩鍏嶄笌 register_openai.js 涓嶄竴鑷?/ 涓?navigator.userAgentData 涓嶄竴鑷?
+    // 取浏览器真实 UA，避免与 register_openai.js 以及 navigator.userAgentData 不一致
     const realUserAgent = await (async () => {
         try {
             const tmpCtx = await browser.newContext();
@@ -194,7 +193,7 @@ async function run() {
     })();
 
     const viewport = { width: 1920, height: 1080 }; // HAR: screen 1920x1080
-    // 瑙ｆ瀽鐪熷疄 UA锛屾瀯閫犱笌涔嬪榻愮殑 sec-ch-ua锛圕lient Hints锛夛紝閬垮厤 UA 涓?brands 涓嶄竴鑷?
+    // 解析真实 UA，构造与之对齐的 sec-ch-ua（Client Hints），避免 UA brands 不一致
     const matched = realUserAgent.match(/Chrome\/(\d+)/);
     const chromeMajor = matched ? Number(matched[1]) : 147;
 
@@ -203,12 +202,12 @@ async function run() {
         viewport,
         locale: 'en-US',
         timezoneId: 'America/New_York',
-        // PayPal HAR: 缇庡浗璐︽埛鍦烘櫙锛涘睆骞曞昂瀵?1920x1080
+        // PayPal HAR: 美国账户场景；屏幕尺寸 1920x1080
         screen: { width: 1920, height: 1080 },
         deviceScaleFactor: 1,
         isMobile: false,
         hasTouch: false,
-        // 鍏滃簳锛氭妸 sec-ch-ua* 涓?UA 寮哄埗瀵归綈锛圥laywright 榛樿浼氭寜 UA 鑷姩绠楋紝浣嗘樉寮忔洿绋筹級
+        // 兜底：把 sec-ch-ua* 与 UA 强制对齐（Playwright 默认会按 UA 自动算，但显式更稳）
         extraHTTPHeaders: {
             'sec-ch-ua': `"Not)A;Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`,
             'sec-ch-ua-mobile': '?0',
@@ -218,9 +217,9 @@ async function run() {
 
     const context = await browser.newContext(contextOptions);
 
-    // ============= 涓ユ牸鎸囩汗浼锛堣鐩?hCaptcha invisible / PerimeterX 涓昏妫€娴嬬偣锛?============
+    // ============= 严格指纹伪装（覆盖 hCaptcha invisible / PerimeterX 主要检测点）============
     await context.addInitScript((injectedChromeMajor) => {
-        // ---- 宸ュ叿锛氱敤 defineProperty 鏀?Navigator.prototype 涓婄殑 getter锛堟瘮鏀?navigator 瀹炰緥鏇撮毦琚瘑鐮达級 ----
+        // ---- 工具：用 defineProperty 给 Navigator.prototype 上的 getter（比 navigator 实例更难被识破） ----
         const NavProto = Object.getPrototypeOf(navigator);
         const ScrProto = Object.getPrototypeOf(screen);
         const safeDefine = (obj, key, getter) => {
@@ -229,12 +228,12 @@ async function run() {
             } catch (_) { /* ignore */ }
         };
 
-        // 1) 褰诲簳闅愯棌 webdriver锛堝湪 prototype 灞傚垹 + 鍦?navigator 涓?set undefined锛?
+        // 1) 彻底隐藏 webdriver（在 prototype 层删除 + 在 navigator 上设为 undefined）
         try { delete Object.getPrototypeOf(navigator).webdriver; } catch (_) { }
         safeDefine(NavProto, 'webdriver', () => undefined);
         try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true }); } catch (_) { }
 
-        // 2) navigator.userAgentData 涓?sec-ch-ua / UA 涓€鑷?
+        // 2) navigator.userAgentData 与 sec-ch-ua / UA 一致
         try {
             const uaData = {
                 brands: [
@@ -261,7 +260,7 @@ async function run() {
             safeDefine(NavProto, 'userAgentData', () => uaData);
         } catch (_) { }
 
-        // 3) plugins / mimeTypes 鐢?Proxy + 鐪熷疄 prototype锛圥luginArray / MimeTypeArray锛?
+        // 3) plugins / mimeTypes 用 Proxy + 真实 prototype（PluginArray / MimeTypeArray）
         try {
             const pdfMime = Object.create(MimeType.prototype);
             Object.defineProperties(pdfMime, {
@@ -301,7 +300,7 @@ async function run() {
             safeDefine(NavProto, 'mimeTypes', () => fakeMimeTypes);
         } catch (_) { }
 
-        // 4) 璇█銆佸钩鍙般€佺‖浠?
+        // 4) 语言、平台硬件信息
         safeDefine(NavProto, 'languages', () => ['en-US', 'en']);
         safeDefine(NavProto, 'language', () => 'en-US');
         safeDefine(NavProto, 'platform', () => 'Win32');
@@ -316,7 +315,7 @@ async function run() {
             safeDefine(NavProto, 'connection', () => conn);
         } catch (_) { }
 
-        // 6) window.chrome锛堟帴杩戠湡瀹?Chrome 鐨勬牱瀛愶級
+        // 6) window.chrome（尽量接近真实 Chrome 的样子）
         try {
             const fakeChrome = {
                 app: {
@@ -356,7 +355,7 @@ async function run() {
             Object.defineProperty(window, 'chrome', { value: fakeChrome, writable: true, configurable: true });
         } catch (_) { }
 
-        // 7) permissions.query 瀹屾暣鍖栵紙notifications / clipboard / geolocation 閮借繑鍥?prompt 涓嶆槸 denied锛?
+        // 7) permissions.query 完整化（notifications / clipboard / geolocation 都返回 prompt 而不是 denied）
         try {
             const origQuery = navigator.permissions.query.bind(navigator.permissions);
             navigator.permissions.query = (params) => {
@@ -367,7 +366,7 @@ async function run() {
             };
         } catch (_) { }
 
-        // 8) screen 涓€鑷存€?
+        // 8) screen 一致性
         safeDefine(ScrProto, 'availHeight', () => 1032);
         safeDefine(ScrProto, 'availWidth', () => 1920);
         safeDefine(ScrProto, 'colorDepth', () => 24);
@@ -375,7 +374,7 @@ async function run() {
         safeDefine(ScrProto, 'width', () => 1920);
         safeDefine(ScrProto, 'height', () => 1080);
 
-        // 9) Canvas锛歵oDataURL & getImageData 鍔犲井鍣０
+        // 9) Canvas：toDataURL & getImageData 加微噪声
         try {
             const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
             HTMLCanvasElement.prototype.toDataURL = function (...args) {
@@ -384,7 +383,7 @@ async function run() {
                     try {
                         const w = this.width, h = this.height;
                         if (w > 0 && h > 0) {
-                            // 鏀?1 鍍忕礌鐨?alpha 鍗冲彲鏀瑰彉 hash锛屼絾瑙嗚鏃犲奖鍝?
+                            // 只改 1 像素 alpha 即可改变 hash，但视觉无影响
                             const data = ctx.getImageData(0, 0, 1, 1);
                             data.data[3] = Math.max(1, data.data[3] - 1);
                             ctx.putImageData(data, 0, 0);
@@ -398,7 +397,7 @@ async function run() {
                 const imageData = origGetImageData.apply(this, args);
                 try {
                     if (imageData && imageData.data && imageData.data.length > 16) {
-                        // 鍦ㄥ墠 4 鍍忕礌鐨?RGBA 涓婂姞 卤1 寰櫔澹?
+                        // 在前 4 像素 RGBA 上加 ±1 微噪声
                         for (let i = 0; i < 16; i += 4) {
                             imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + (Math.random() < 0.5 ? -1 : 1)));
                         }
@@ -408,7 +407,7 @@ async function run() {
             };
         } catch (_) { }
 
-        // 10) WebGL锛氫吉瑁?vendor / renderer + 鍏抽敭鍙傛暟鍔犲井鍣０
+        // 10) WebGL：伪 vendor / renderer + 关键参数加微噪声
         try {
             const fakeWebGL = (gl) => {
                 const origGetParameter = gl.getParameter.bind(gl);
@@ -429,7 +428,7 @@ async function run() {
             };
         } catch (_) { }
 
-        // 11) AudioContext 鎸囩汗寰櫔澹帮紙hCaptcha 涔熺敤杩欎釜锛?
+        // 11) AudioContext 指纹微噪声（hCaptcha 也会用到）
         try {
             const origCreateAnalyser = (window.OfflineAudioContext || window.webkitOfflineAudioContext || window.AudioContext).prototype.createAnalyser;
             if (origCreateAnalyser) {
@@ -448,7 +447,7 @@ async function run() {
             }
         } catch (_) { }
 
-        // 12) iframe 鐨?navigator/window 涔熻濂楃敤鍚屾牱鐨?patch锛坔Captcha 鑷繁璺戝湪 iframe 閲岋級
+        // 12) iframe 里的 navigator/window 也要套用同样的 patch（hCaptcha 自己跑在 iframe 里）
         try {
             const origCreate = Document.prototype.createElement;
             Document.prototype.createElement = function (tag, ...rest) {
@@ -472,7 +471,7 @@ async function run() {
             };
         } catch (_) { }
 
-        // 13) 鍒犻櫎 ChromeDriver 鐥曡抗锛坈dc_*銆?cdc_*锛?
+        // 13) 删除 ChromeDriver 痕迹（cdc_* / $cdc_*）
         try {
             for (const key of Object.keys(window)) {
                 if (/^(cdc_|\$cdc_|_phantom|callPhantom|webdriver-|driver-)/.test(key)) {
@@ -481,7 +480,7 @@ async function run() {
             }
         } catch (_) { }
 
-        // 14) Notification.permission 榛樿 'default'锛坔eadless 涓嬪彲鑳芥槸 'denied'锛?
+        // 14) Notification.permission 默认 'default'（headless 下可能是 'denied'）
         try {
             if (typeof Notification !== 'undefined') {
                 const origPerm = Object.getOwnPropertyDescriptor(Notification, 'permission');
@@ -498,19 +497,19 @@ async function run() {
     try {
         // --- Phase 0: Proxy Connectivity Check ---
         if (proxyConfig) {
-            // (闈欓粯) 妫€鏌ヤ唬鐞嗚繛閫氭€?
+            // (静默) 检查代理连通性
             try {
                 const probeResponse = await context.request.get("http://api.ipify.org/?format=text", {
                     timeout: 15000
                 });
                 if (probeResponse.ok()) {
                     const ip = (await probeResponse.text()).trim();
-                    // 淇濈暀杩涘害鏍囪鍏抽敭瀛?"浠ｇ悊杩炴帴鎴愬姛! 浠ｇ悊鍏綉 IP" 浠ヤ究 product_activator/server 璇嗗埆杩涘害锛?
-                    // 浣嗗彧闇叉渶鍚庝袱娈碉紝閬垮厤瀹屾暣鍑哄彛 IP 娉勯湶
+                    // 保留进度标记关键字 "代理连接成功! 代理公网 IP" 以便 product_activator/server 识别进度
+                    // 但只展示后两段，避免完整出口 IP 泄露
                     const ipMasked = String(ip).replace(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/, '***.***.$3.$4');
-                    console.log(`鉁?[绯荤粺] 浠ｇ悊杩炴帴鎴愬姛! 浠ｇ悊鍏綉 IP: ${ipMasked}`);
+                    console.log(`✅ [代理] 代理连接成功! 代理公网 IP: ${ipMasked}`);
                 } else {
-                    throw new Error(`浠ｇ悊鍝嶅簲寮傚父: HTTP ${probeResponse.status()}`);
+                    throw new Error(`代理检测失败: HTTP ${probeResponse.status()}`);
                 }
             } catch (proxyError) {
                 console.log("    [!] 请检查 PROXY 配置是否正确，或账号余额是否充足。");
@@ -521,7 +520,7 @@ async function run() {
         // --- Phase 1: API Initialization ---
         const gpt = new ChatGPTService(context.request, CONFIG.chatgptToken, CONFIG.stripeKey);
         const createCheckoutUrl = async () => {
-            // (闈欓粯) 鍒涘缓璁㈠崟锛堟垚鍔?澶辫触鐢?chatgpt.js 鍐呮墦鍗帮級
+            // (静默) 创建订单（成功/失败由 chatgpt.js 内打印）
             const url = await gpt.getPayPalApprovalUrl(CONFIG.billing);
             if (url && process.send) {
                 process.send({ type: 'checkout_url', url });
@@ -532,31 +531,31 @@ async function run() {
         let paypalUrl = String(process.env.REUSE_CHECKOUT_URL || '').trim();
         let usingReusedCheckoutUrl = Boolean(paypalUrl);
         if (usingReusedCheckoutUrl) {
-            console.log("鈾伙笍 [姝ラ] 澶嶇敤涓婃鐢熸垚鐨?Stripe Hosted Checkout 椤甸潰...");
+            console.log("♻️ [步骤] 复用上次生成的 Stripe Hosted Checkout 页面...");
         } else {
             paypalUrl = await createCheckoutUrl();
         }
 
         if (!paypalUrl) {
-            throw new Error("鏃犳硶鑾峰彇 PayPal 瀹℃壒閾炬帴");
+            throw new Error("无法获取 PayPal 审批链接");
         }
 
         // --- Phase 2: Automation Setup ---
         page = await context.newPage();
         page.on('close', () => {
-            console.warn(`鈿狅笍 [绯荤粺] 褰撳墠椤甸潰宸插叧闂紝鍏抽棴鍓嶆渶鍚?URL: ${page.url()}`);
+            console.warn(`⚠️ [系统] 页面已关闭，当前 URL: ${page.url()}`);
         });
         await page.route('**/auth/validatecaptcha', async route => {
-            // 濡傛灉璇锋眰鏄拡瀵归獙璇侀〉闈㈢殑锛岃繑鍥炰竴涓┖鐧界殑 HTML
-            console.log('鎷︽埅鍒颁簡瀹夊叏鎸戞垬椤甸潰锛屾鍦ㄥ睆钄?..');
+            // 如果请求是针对验证页面的，返回一个空白的 HTML
+            console.log('ℹ️ [系统] 已拦截 auth/validatecaptcha 请求...');
             await route.fulfill({
                 status: 200,
                 contentType: 'text/html',
-                body: '<html><body></body></html>' // 杩斿洖绌虹櫧鍐呭
+                body: '<html><body></body></html>' // 返回空白内容
             });
         });
 
-        // 宸茬鐢ㄣ€屾棤鍔ㄩ潤鑷姩鎴浘銆嶏紙鐢ㄦ埛瑕佹眰锛夈€傚け璐ユ椂浠嶇敱鍚?catch 鍒嗘敮涓诲姩鎴浘璇婃柇銆?
+        // 已禁用“无动静自动截图”（用户要求）；失败时仍由 catch 分支主动截图诊断
         stopInactivityWatcher = () => { /* noop */ };
         if (false) {
             const inactivityMs = 30000;
@@ -589,16 +588,16 @@ async function run() {
                     }
                     isCapturing = true;
                     try {
-                        await captureDebugScreenshot(context, page, 'inactive', '30绉掓棤鍔ㄩ潤鑷姩鎴浘');
+                        await captureDebugScreenshot(context, page, 'inactive', '30秒无动静自动截图');
                         captureCount += 1;
                         const stuckUrl = page.url();
                         if (captureCount >= maxCapturesPerStall) {
-                            console.error(`鉂?[绯荤粺] 椤甸潰鐤戜技鍗℃锛?{captureCount * 30} 绉掓棤鏈夋晥杩涘睍 (URL: ${stuckUrl})`);
+                            console.error(`❌ [系统] 页面连续 ${captureCount * 30} 秒无动静，强制关闭 (URL: ${stuckUrl})`);
                             await page.close().catch(() => { });
                             return;
                         }
                     } catch (e) {
-                        console.warn(`鈿狅笍 [绯荤粺] 鑷姩鎴浘澶辫触: ${e.message}`);
+                        console.warn(`⚠️ [系统] 自动截图失败: ${e.message}`);
                     } finally {
                         isCapturing = false;
                         if (page && !page.isClosed()) {
@@ -640,7 +639,7 @@ async function run() {
         const solveSlider = async () => {
             const BUTTON_SELECTORS = [
                 "button:has-text('Confirm')",
-                "button:has-text('纭鎮ㄦ槸鐪熶汉')",
+                "button:has-text('确认您是真人')",
                 "button:has-text(\"I'm not a robot\")",
                 "button:has-text('Verify')",
                 "div.ctp-checkbox-container",
@@ -667,9 +666,9 @@ async function run() {
                 "#nc_1_n1z",
                 "#challenge-container",
                 "[aria-label*='slider' i]",
-                "[aria-label*='婊戝潡']",
+                "[aria-label*='slider' i]",
                 "[role='slider']",
-                "div:has-text('鎷栧姩婊戝潡')",
+                "div:has-text('Drag the slider')",
                 "div:has-text('Drag the slider')",
                 "p:has-text('Move the slider all the way to the right')"
             ];
@@ -696,10 +695,10 @@ async function run() {
             };
 
             try {
-                // 1) 绠€鍗曠偣鍑诲瀷楠岃瘉锛圱urnstile/hCaptcha 澶嶉€夋銆丆onfirm 鎸夐挳锛?
+                // 1) 简单点击型验证（Turnstile/hCaptcha 复选框、Confirm 按钮）
                 const btnHit = await tryFindFirstVisible(BUTTON_SELECTORS);
                 if (btnHit) {
-                    console.log(`馃З [椋庢帶] 妫€娴嬪埌楠岃瘉鎸夐挳: ${btnHit.selector}`);
+                    console.log(`🛡️ [风控] 命中验证按钮: ${btnHit.selector}`);
                     try {
                         const box = await btnHit.locator.boundingBox();
                         if (box) {
@@ -711,15 +710,15 @@ async function run() {
                         console.log("✅ [风控] 验证按钮点击完成。");
                         return true;
                     } catch (e) {
-                        console.warn(`鈿狅笍 [椋庢帶] 楠岃瘉鎸夐挳鐐瑰嚮澶辫触: ${e.message}`);
+                        console.warn(`⚠️ [风控] 点击验证按钮失败: ${e.message}`);
                     }
                 }
 
-                // 2) 婊戝潡鎷栧姩
+                // 2) 滑块拖动
                 const sliderHit = await tryFindFirstVisible(SLIDER_SELECTORS);
                 if (sliderHit) {
                     const { frame, selector, locator: slider } = sliderHit;
-                    console.log(`馃З [椋庢帶] 妫€娴嬪埌婊戝潡: ${selector}`);
+                    console.log(`🛡️ [风控] 命中滑块: ${selector}`);
                     const box = await slider.boundingBox();
                     if (!box) {
                         console.warn(`⚠️ [风控] 滑块命中但拿不到 boundingBox，跳过。`);
@@ -732,7 +731,7 @@ async function run() {
                     const cBox = (await container.isVisible({ timeout: 200 }).catch(() => false))
                         ? await container.boundingBox().catch(() => null)
                         : null;
-                    // PayPal 婊戝潡闇€瑕佹嫋鍒板鍣ㄦ渶鍙崇锛岃窛绂?= 瀹瑰櫒瀹?- 婊戝潡瀹斤紙鍐嶅姞灏戦噺瀵屼綑纭繚璐村彸杈癸級
+                    // PayPal 滑块需要拖到容器最右端，距离 = 容器宽 - 滑块宽（再加少量富余确保贴右边）
                     const distance = cBox ? Math.max(0, cBox.width - box.width + 6) : 310;
 
                     const startX = box.x + box.width / 2;
@@ -759,7 +758,7 @@ async function run() {
                     return true;
                 }
 
-                // 3) 娌℃湁鍛戒腑锛氭妸椤甸潰涓婂父瑙佹寫鎴?iframe 鍒楀嚭鏉ヤ究浜庢帓鏌?
+                // 3) 没有命中：把页面上常见挑战 iframe 列出来便于排查
                 const knownIframeMatches = [];
                 for (const frame of collectFrames()) {
                     const url = frame.url() || '';
@@ -768,12 +767,12 @@ async function run() {
                     }
                 }
                 if (knownIframeMatches.length) {
-                    console.warn(`馃З [椋庢帶] 妫€娴嬪埌鎸戞垬 iframe 浣嗘湭璇嗗埆鍙嫋鍔ㄦ粦鍧? ${knownIframeMatches.join(' | ')}`);
+                    console.warn(`⚠️ [风控] 检测到挑战 iframe 但未识别可拖动滑块: ${knownIframeMatches.join(' | ')}`);
                 } else {
                     console.log("⚠️ [风控] 未检测到滑块/验证按钮（PayPal 未下发挑战）。");
                 }
             } catch (e) {
-                console.warn(`鈿狅笍 [椋庢帶] solveSlider 寮傚父: ${e.message}`);
+                console.warn(`⚠️ [风控] solveSlider 异常: ${e.message}`);
             }
             return false;
         };
@@ -785,7 +784,7 @@ async function run() {
          * Fetches the 6-digit SMS code from the API
          */
         const getSMSCode = async (timeout = 120000) => {
-            console.log("馃摠 [鐩戝惉] 姝ｅ湪绛夊緟鐭俊楠岃瘉鐮?..");
+            console.log("📨 [步骤] 正在获取短信验证码...");
             const start = Date.now();
             const apiUrl = `http://a.62-us.com/api/get_sms?key=${CONFIG.billing.smsKey}`;
             let consecutiveNoCode = 0;
@@ -794,27 +793,27 @@ async function run() {
                 try {
                     const response = await context.request.get(apiUrl);
                     const text = await response.text();
-                    console.log(`   [鐭俊] 鎺ュ彛杩斿洖: ${text}`);
+                    console.log(`   [短信] 接口返回: ${text}`);
 
                     if (text.includes("yes|")) {
                         const match = text.match(/\b(\d{6})\b/);
                         if (match) {
-                            console.log(`鉁?[鐭俊] 楠岃瘉鐮佹彁鍙栨垚鍔? ${match[1]}`);
+                            console.log(`✅ [步骤] 已获取短信验证码: ${match[1]}`);
                             return match[1];
                         }
                     }
 
                     if (text.includes('no|') || text.includes('暂无验证码') || text.includes('no code')) {
                         consecutiveNoCode += 1;
-                        // 杩炵画鏃犻獙璇佺爜锛氭彁鍓嶅垽瀹氳鍙蜂笉鍙敤锛岄伩鍏嶉暱鏃堕棿鍗℃娴垂璧勬簮
-                        if (consecutiveNoCode >= 12) { // 绾?1 鍒嗛挓
+                        // 连续无验证码：提前判定该号不可用，避免长时间卡死浪费资源
+                        if (consecutiveNoCode >= 12) { // 约 1 分钟
                             throw new Error('短信验证码超时：该手机号无验证码');
                         }
                     } else {
                         consecutiveNoCode = 0;
                     }
                 } catch (e) {
-                    console.error(`[-] [鐭俊] 鎺ュ彛璇锋眰寮傚父: ${e.message}`);
+                    console.error(`[-] [短信] 接口请求异常: ${e.message}`);
                     if (String(e.message || '').includes('短信验证码超时')) throw e;
                 }
                 await page.waitForTimeout(5000); // Poll every 5s
@@ -823,42 +822,42 @@ async function run() {
         };
 
         const checkCriticalErrors = async () => {
-            // 鍦ㄥ紑濮嬫壂鎻忓墠锛屽厛绛夊緟 1.5 绉掞紝缁欓〉闈㈠姩鎬佸脊鍑烘嫤鎴鐣欏嚭缂撳啿鏃堕棿
+            // 在开始扫描前，先等待 1.5 秒，给页面动态弹出拦截框留出缓冲时间
             await page.waitForTimeout(1500);
 
             try {
                 const currentUrl = page.url();
                 if (currentUrl.includes('/checkoutweb/genericError')) {
-                    throw new Error('"鐩戞祴鍒拌嚧鍛芥嫤鎴?(Security Block): You have been blocked"');
+                    throw new Error("支付被拦截 (Security Block): You have been blocked");
                 }
 
                 const allFrames = [page, ...page.frames()];
 
                 for (const frame of allFrames) {
                     try {
-                        // 浼樺寲鐐?锛氫娇鐢?:visible 浼被锛屽彧鎻愬彇鐪熷疄娓叉煋鍦ㄩ〉闈笂銆佺敤鎴疯兘鐪嬭鐨勬枃鏈?
-                        // 浼樺寲鐐?锛歵extContent 姣?innerText 鑾峰彇鍔ㄦ€佹枃鏈洿绋冲畾锛屼笖涓嶅彈 CSS 鏍峰紡骞叉壈
+                        // 优化点：使用 :visible 伪类，只提取真实渲染在页面上、用户能看见的文本
+                        // 优化点：textContent 比 innerText 获取动态文本更稳定，且不受 CSS 样式干扰
                         const visibleText = await frame.locator(':visible').allTextContents().then(texts => texts.join(' ')).catch(() => "");
 
                         if (!visibleText) continue;
 
-                        // 1. 鑷村懡鎷︽埅鏂囧瓧 (鍏?Frame 鎵弿鍙鏂囨湰)
+                        // 1. 致命拦截文字（跨 Frame 扫描可见文本）
                         if (visibleText.includes("We couldn鈥檛 load the security challenge") || visibleText.includes("You have been blocked") || visibleText.includes("Return to merchant")) {
-                            throw new Error("鐩戞祴鍒拌嚧鍛芥嫤鎴?(Security Block): You have been blocked");
+                            throw new Error("支付被拦截 (Security Block): You have been blocked");
                         }
 
 
 
-                        // 2. 鎵嬫満鍙?閾惰鍗¤鎷掓枃瀛?
+                        // 2. 手机号/银行卡被拒文案
                         if (visibleText.includes("different phone number")) {
                             throw new Error("手机号码被拒绝或系统拦截");
                         }
                         if (visibleText.includes("Things don't seem to be working") || visibleText.includes("Your account is limited")) {
-                            throw new Error("閾惰鍗¤鎷掔粷 (Card declined)");
+                            throw new Error("银行卡被拒绝 (Card declined)");
                         }
 
                     } catch (e) {
-                        // 灏嗗叿浣撶殑鎷︽埅閿欒缁х画鍚戜笂鎶涘嚭
+                        // 将具体的拦截错误继续向上抛出
                         if (e.message.includes("Security Block") || e.message.includes("blocked") || e.message.includes("拦截")) throw e;
                     }
                 }
@@ -870,43 +869,43 @@ async function run() {
         async function mouseBreathing(page, duration) {
             const startTime = Date.now();
             while (Date.now() - startTime < duration) {
-                // 鑾峰彇褰撳墠澶ф浣嶇疆锛岃繘琛屾瀬灏忚寖鍥寸殑闅忔満鍋忕Щ锛埪?鍍忕礌锛?
+                // 获取当前大概位置，进行极小范围的随机偏移（5 像素内）
                 const jitterX = randomDelay(-5, 5);
                 const jitterY = randomDelay(-5, 5);
-                // 浣跨敤 move 鐨?steps: 1 淇濊瘉骞虫粦杩囨浮鍒板亸绉讳綅缃?
+                // 使用 move 的 steps 保证平滑过渡到偏移位置
                 await page.mouse.move(page.lastMouseX + jitterX, page.lastMouseY + jitterY, { steps: 5 });
-                await page.waitForTimeout(randomDelay(100, 300)); // 棰ゅ姩鐨勯鐜?
+                await page.waitForTimeout(randomDelay(100, 300)); // 颤动频率
             }
         }
 
-        // 鍏ㄥ眬杩炶疮婕父锛堣В鍐抽紶鏍囩灛绉婚棶棰橈級
+        // 全局连贯漫游（解决鼠标瞬移问题）
         async function continuousHumanRoam(page, duration = 3000) {
-            // 鑾峰彇褰撳墠榧犳爣鐨勫疄鏃跺潗鏍囦綔涓鸿捣鐐癸紙淇濊瘉杞ㄨ抗杩炶疮锛?
-            // 娉ㄦ剰锛歅laywright 鏃犳硶鐩存帴璇诲彇褰撳墠榧犳爣鍧愭爣锛屾垜浠渶瑕佽嚜宸卞湪 page 瀵硅薄涓婄淮鎶や竴涓姸鎬?
-            // 濡傛灉浣犳病鏈夌淮鎶わ紝鍙互浣跨敤涓€涓叏灞€鍙橀噺鏉ヨ褰曚笂涓€娆＄Щ鍔ㄧ殑缁堢偣
+            // 获取当前鼠标的近似实时坐标作为起点，保证轨迹连贯
+            // 注意：Playwright 无法直接读取当前鼠标坐标，我们需要自己在 page 对象上维护一个状态
+            // 如果没有维护，可以用全局变量记录上一次移动的终点
             const startX = page.lastMouseX || 500;
             const startY = page.lastMouseY || 500;
 
-            // 闅忔満鐢熸垚缁堢偣锛堥伩寮€娴忚鍣ㄦ瀬杈圭紭锛?
+            // 随机生成终点（避开浏览器极边缘）
             const targetX = randomDelay(100, 1100);
             const targetY = randomDelay(100, 700);
 
-            // 璁板綍鏈缁堢偣锛屼緵涓嬩竴娆¤皟鐢ㄤ娇鐢?
+            // 记录本次终点，供下一次调用使用
             page.lastMouseX = targetX;
             page.lastMouseY = targetY;
 
-            // 鐢熸垚璐濆灏旀洸绾挎帶鍒剁偣锛堣杞ㄨ抗鍙樻垚骞虫粦鐨勫姬绾匡級
+            // 生成贝塞尔曲线控制点（让轨迹变成平滑的弧线）
             const cp1x = startX + (targetX - startX) * 0.3 + randomDelay(-200, 200);
             const cp1y = startY + (targetY - startY) * 0.3 + randomDelay(-200, 200);
             const cp2x = startX + (targetX - startX) * 0.7 + randomDelay(-200, 200);
             const cp2y = startY + (targetY - startY) * 0.7 + randomDelay(-200, 200);
 
-            const steps = 50; // 澧炲姞姝ユ暟璁╃Щ鍔ㄦ洿缁嗚吇
+            const steps = 50; // 增加步数让移动更细腻
             const stepDelay = duration / steps;
 
             for (let i = 0; i <= steps; i++) {
                 const t = i / steps;
-                // 涓夋璐濆灏旀洸绾垮叕寮?
+                // 三次贝塞尔曲线公式
                 const x = Math.pow(1 - t, 3) * startX +
                     3 * Math.pow(1 - t, 2) * t * cp1x +
                     3 * (1 - t) * Math.pow(t, 2) * cp2x +
@@ -917,57 +916,57 @@ async function run() {
                     Math.pow(t, 3) * targetY;
 
                 await page.mouse.move(x, y);
-                // 姣忎竴姝ュ姞鍏ュ井灏忕殑鏃堕棿鎶栧姩锛屾ā鎷熶汉鎵嬬殑涓嶅寑閫?
+                // 每一步加入微小时间抖动，模拟人手的不匀速
                 await page.waitForTimeout(stepDelay + randomDelay(-10, 15));
             }
         }
-        // 鎷熶汉鍖栭殢鏈哄欢杩?
+        // 拟人化随机延迟
         const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-        // 鏍稿績鎷熶汉杈撳叆鍑芥暟锛氬厛鐪嬨€佸啀鐐广€佸伓灏旀墦閿欏瓧銆佸啀鍒犳帀閲嶆墦
+        // 核心拟人输入函数：先看、再点、偶尔打错字、再删掉重打
         async function humanTypeWithSoul(page, locator, text) {
-            // 1. 鐪肩潧鍏堣繃鍘伙紙榧犳爣鎮仠鍦ㄨ緭鍏ユ涓婏紝鍋囪鍦ㄧ湅锛?
+            // 1. 眼睛先过去（鼠标悬停在输入框上，假装在看）
             const box = await locator.boundingBox();
             if (box) {
                 await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 20 });
-                await page.waitForTimeout(randomDelay(400, 1200)); // 鐪肩纭浣嶇疆
+                await page.waitForTimeout(randomDelay(400, 1200)); // 眼神确认位置
             }
 
-            // 2. 鐐瑰嚮鑾峰彇鐒︾偣
+            // 2. 点击获取焦点
             await locator.click();
             await page.waitForTimeout(randomDelay(200, 500));
 
-            // 3. 妯℃嫙鎵撳瓧锛堝姞鍏ュ伓灏旂殑鎵撻敊瀛楀拰閫€鏍肩籂閿欓€昏緫锛?
+            // 3. 模拟打字（加入偶尔打错字和退格纠错逻辑）
             for (let i = 0; i < text.length; i++) {
-                // 95% 姒傜巼鎵撳瀛楋紝5% 姒傜巼鎵撻敊鐒跺悗閫€鏍硷紙妯℃嫙鐪熷疄鎵嬭锛?
+                // 95% 概率打对字，5% 概率打错然后逢格（模拟真实手误?
                 if (Math.random() < 0.05 && i > 2) {
-                    await page.keyboard.type('x'); // 闅忎究鎵撲釜閿欏瓧
+                    await page.keyboard.type('x'); // 随便打个错字
                     await page.waitForTimeout(randomDelay(100, 200));
-                    await page.keyboard.press('Backspace'); // 鍒犳帀閿欏瓧
-                    await page.waitForTimeout(randomDelay(150, 300)); // 绾犻敊鍚庣殑鍋滈】
+                    await page.keyboard.press('Backspace'); // 删掉错字
+                    await page.waitForTimeout(randomDelay(150, 300)); // 纠错后的停顿
                 }
 
-                // 姝ｅ父杈撳叆瀛楃
+                // 正常输入字符
                 await page.keyboard.type(text[i]);
-                // 鎵撳瓧閫熷害涓嶅潎鍖€锛氬伓灏斿揩锛屽伓灏斿崱椤夸竴涓?
+                // 打字速度不均匀：偶尔快，偶尔卡顿一下
                 let typeDelay = randomDelay(80, 200);
-                if (Math.random() < 0.1) typeDelay += randomDelay(300, 800); // 鍋跺皵绐佺劧鍗″３鎯充竴涓?
+                if (Math.random() < 0.1) typeDelay += randomDelay(300, 800); // 偶尔突然卡壳想一下
                 await page.waitForTimeout(typeDelay);
             }
         }
 
 
-        // 鏍稿績鎷熶汉鍖栧～绌哄嚱鏁帮紙鍚～鍚庢牎楠岋細涓嶄竴鑷村垯娓呯┖閲嶅～锛岀洿鍒版垚鍔熶负姝級
-        // digitsMode=true锛氬崱鍙?鎵嬫満鍙?鏈夋晥鏈?CVC 瀛楁銆?
-        //   PayPal 鐨勫崱鍙?/ 鎵嬫満鍙峰瓧娈佃繎鏈熷紑鍚簡 4-4-4-4 鑷姩鏍煎紡鍖栵紙onInput 閲嶆帓甯︾┖鏍硷級锛?
-        //   閫愬瓧绗?keyboard.type 浼氳 React 閲嶆帓鍚炲瓧绗︼紝鎵€浠ヨ繖绫诲瓧娈电洿鎺ョ敤 page.fill() 涓€娆℃€у啓鍏ャ€?
-        //   PayPal 涓嶄細妫€娴嬪～鍗℃椂闀匡紝榧犳爣 / 鎻愪氦鏃堕暱鐢卞叾浠栦汉鎵嬫ā鎷熻鐩栥€?
+        // 核心拟人化填空函数（含填后校验：不一致则清空重填，直到成功为止）
+        // digitsMode=true：卡号 / 手机 / 有效期 / CVC 字段
+        //   PayPal 的卡号 / 手机号字段近期开启了 4-4-4-4 自动格式化（onInput 重排带空格）
+        //   逐字 keyboard.type 会被 React 重排吞字符，所以这类字段直接用 page.fill() 一次写入
+        //   PayPal 不会检测填卡时长，鼠标 / 提交时长由其他人手模拟覆盖
         async function humanFillInput(page, locator, text, digitsMode = false, fastMode = false) {
             const digitsOnly = (s) => String(s || '').replace(/\D/g, '');
 
-            // 鈥斺€?digitsMode 鎴?fastMode锛氭ā鎷熴€屽瘑鐮佺鐞嗗櫒绮樿创銆嶏紝鐬椂濉叆
-            // 鐪熷疄鐢ㄦ埛鍦ㄥ崱鍙?/ 閭 / 瀵嗙爜 瀛楁涓?90% 鏄矘璐磋€岄潪閫愬瓧鏁诧紝
-            // 鎱㈣妭濂忔暡瀛楀弽鑰岃Е鍙?hCaptcha invisible 鐨?閿洏浜嬩欢杩囬暱"椋庢帶鍒ゅ垎銆?
+            // digitsMode / fastMode：模拟密码管理器粘贴，瞬时填入
+            // 真实用户在卡号 / 邮箱 / 密码字段，很多时候都是粘贴而不是逐字敲
+            // 慢节奏敲字反而可能触发 hCaptcha invisible 对“键盘事件过长”的风控判分
             if (digitsMode || fastMode) {
                 let attempt = 0;
                 while (attempt < 5) {
@@ -989,7 +988,7 @@ async function run() {
                         await page.keyboard.press('Delete').catch(() => { });
                         await page.keyboard.type(text, { delay: 20 });
                     }
-                    // 瑙﹀彂 React onChange / onBlur锛岀‘淇濇牸寮忓寲鐢熸晥
+                    // 触发 React onChange / onBlur，确保格式化生效
                     await locator.evaluate((node) => {
                         try {
                             node.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1006,13 +1005,13 @@ async function run() {
                     if (compareOk) {
                         return;
                     }
-                    console.log(`鈿狅笍 [鏍￠獙] (${digitsMode ? 'digits' : 'fast'}) 绗?{attempt}娆″～鍐欎笉涓€鑷达紝棰勬湡: "${text}"锛屽疄闄? "${actualValue}"锛岄噸濉腑...`);
+                    console.log(`ℹ️ [校验] (${digitsMode ? 'digits' : 'fast'}) 第 ${attempt} 次写入后仍不一致: 预期 "${text}"，实际 "${actualValue}"，准备重试...`);
                 }
                 console.warn(`⚠️ [校验] (${digitsMode ? 'digits' : 'fast'}) 多次尝试仍不一致，使用最后一次结果继续。`);
                 return;
             }
 
-            // 鈥斺€?鏅€氬瓧娈碉紙濮撳悕 / 閭 / 鍦板潃 / 瀵嗙爜锛夛細淇濈暀浜烘墜鑺傚
+            // 普通字段（姓名 / 邮箱 / 地址 / 密码）：保留人手节奏
             let attempt = 0;
             while (true) {
                 attempt++;
@@ -1048,7 +1047,7 @@ async function run() {
                     console.warn(`⚠️ [校验] 普通字段 5 次重填后仍不一致，预期: "${text}"，实际: "${actualValue}"，继续后续流程。`);
                     break;
                 }
-                console.log(`鈿狅笍 [鏍￠獙] 绗?{attempt}娆″～鍐欎笉涓€鑷达紝棰勬湡: "${text}", 瀹為檯: "${actualValue}"锛屾竻绌洪噸濉?..`);
+                console.log(`ℹ️ [校验] 第 ${attempt} 次重填后仍不一致: 预期 "${text}"，实际 "${actualValue}"，继续重试...`);
                 await locator.click();
                 await page.waitForTimeout(randomDelay(100, 200));
                 await page.keyboard.press('Control+A');
@@ -1060,7 +1059,7 @@ async function run() {
 
         // --- Phase 3: Checkout Execution ---
         const openCheckoutPage = async () => {
-            console.log("馃挸 [姝ラ] 鎵撳紑 Stripe Hosted Checkout 椤甸潰...");
+            console.log("💳 [步骤] 打开 Stripe Hosted Checkout 页面...");
             try {
                 await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
                 await recoverConnectionClosed(page, paypalUrl);
@@ -1069,11 +1068,11 @@ async function run() {
                 if (!usingReusedCheckoutUrl) {
                     throw error;
                 }
-                console.warn(`鈿狅笍 [姝ラ] 澶嶇敤鏀粯閾炬帴鎵撳紑澶辫触锛岄噸鏂扮敓鎴愭敮浠橀摼鎺? ${error.message}`);
+                console.warn(`⚠️ [步骤] 复用旧 Checkout 链接打开失败，准备重新生成: ${error.message}`);
                 paypalUrl = await createCheckoutUrl();
                 usingReusedCheckoutUrl = false;
                 if (!paypalUrl) {
-                    throw new Error("鏃犳硶鑾峰彇 PayPal 瀹℃壒閾炬帴");
+                    throw new Error("无法获取 PayPal 审批链接");
                 }
                 await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
                 await recoverConnectionClosed(page, paypalUrl);
@@ -1105,7 +1104,7 @@ async function run() {
                 .catch(() => []);
         };
 
-        // 浠ｇ悊鎱㈡椂 Stripe 浼氬垎娈垫覆鏌擄紝缁欒冻绐楀彛骞跺娆￠噰鏍烽噾棰濆厓绱犮€?
+        // 代理慢时 Stripe 会分段渲染，给足窗口并多次采样金额元素
         const amountWaitTimeoutMs = 120000;
         const amountPollIntervalMs = 1500;
         const amountDeadline = Date.now() + amountWaitTimeoutMs;
@@ -1121,11 +1120,11 @@ async function run() {
         }
 
         if (usingReusedCheckoutUrl && latestAmountTexts.length === 0) {
-            console.warn("鈿狅笍 [姝ラ] 澶嶇敤鏀粯閾炬帴鏈繘鍏ユ湁鏁?Checkout 椤甸潰锛岄噸鏂扮敓鎴愭敮浠橀摼鎺?..");
+            console.warn("⚠️ [步骤] 复用的 Checkout 页面未加载出金额，重新生成链接...");
             paypalUrl = await createCheckoutUrl();
             usingReusedCheckoutUrl = false;
             if (!paypalUrl) {
-                throw new Error("鏃犳硶鑾峰彇 PayPal 瀹℃壒閾炬帴");
+                throw new Error("无法获取 PayPal 审批链接");
             }
             await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
             await recoverConnectionClosed(page, paypalUrl);
@@ -1142,14 +1141,14 @@ async function run() {
                 await page.waitForTimeout(amountPollIntervalMs);
             }
         }
-        console.log(`馃挵 [姝ラ] 褰撳墠椤甸潰閲戦鍏冪礌: ${latestAmountTexts.join(' | ') || '(绌?'}`);
+        console.log(`💰 [步骤] 当前页面金额元素: ${latestAmountTexts.join(' | ') || '(?)'}`);
         if (!hasZeroAmount) {
             const displayAmount = latestAmountTexts[0] || 'unknown';
-            throw new Error(`閲戦鏍￠獙澶辫触锛屽綋鍓嶉噾棰濅笉鏄?0 鍏? ${displayAmount}`);
+            throw new Error(`金额校验失败：当前订单不是 0 元: ${displayAmount}`);
         }
         console.log("✅ [步骤] 金额校验通过，确认是 0 元订单。");
-        // Phase 3: 鐩村鏍稿績 - 瑙﹀彂 PayPal 閲嶅畾鍚?
-        // (闈欓粯) 鐩存帴瑙﹀彂 PayPal 閲嶅畾鍚?
+        // Phase 3: 直奔核心 - 触发 PayPal 重定?
+        // (静默) 直接触发 PayPal 重定向
 
         const triggerPayPal = async () => {
             const selectors = [
@@ -1161,7 +1160,7 @@ async function run() {
             for (const sel of selectors) {
                 const el = page.locator(sel).first();
                 if (await el.isVisible().catch(() => false)) {
-                    // (闈欓粯) 鍛戒腑 PayPal 瑙﹀彂鍣ㄩ€夋嫨鍣?
+                    // (静默) 命中 PayPal 触发器选择器
                     await el.click({ force: true });
                     return true;
                 }
@@ -1169,28 +1168,28 @@ async function run() {
             return false;
         };
 
-        // 灏濊瘯鐩存帴鐐瑰嚮锛屽鏋滀笉鎴愬姛鍒欏埛鏂颁竴娆″啀鐐?
+        // 尝试直接点击，如果不成功则刷新一次再试
         if (!await triggerPayPal()) {
-            console.log("鈴?[姝ラ] 鏈兘鐩存帴瑙﹀彂锛屾鍦ㄥ埛鏂伴〉闈㈠己鍒跺姞杞芥敮浠樼粍浠?..");
+            console.log("⚠️ [步骤] 未直接命中 PayPal 入口，尝试刷新页面后重试...");
             try {
                 await page.reload({ waitUntil: 'networkidle', timeout: 30000 });
                 await recoverConnectionClosed(page, paypalUrl);
                 if (!await triggerPayPal()) {
-                    // 鍏滃簳锛氬皾璇曠洿鎺ュ鎵炬墍鏈夌殑 PayPal 鏂囧瓧骞剁偣鍑?
+                    // 兜底：尝试直接寻找所有的 PayPal 文字并点击
                     await page.locator('text=PayPal').first().click({ force: true }).catch(() => { });
                     await page.waitForTimeout(1500);
                 }
             } catch (_) {
-                throw new Error("鏃犳硶鑾峰彇 PayPal 瀹℃壒閾炬帴");
+                throw new Error("无法获取 PayPal 审批链接");
             }
         }
 
-        // (闈欓粯) 宸茶Е鍙?PayPal 娴佺▼
+        // (静默) 已触发 PayPal 流程
         await page.waitForTimeout(2000);
 
 
-        // 閫氱敤锛氱瓑寰呭厓绱犲彲瑙侊紝瓒呮椂鍒欏埛鏂颁竴娆″啀绛夛紙閬垮厤 Stripe / PayPal 鍋跺彂绌虹櫧锛?
-        // 娉ㄦ剰锛歳eload 浼氭竻绌哄凡濉瓧娈碉紝鍥犳鍙敤鍦ㄣ€岃闃舵鏈€鏃╀竴涓瓧娈点€嶄笂
+        // 通用：等待元素可见，超时则刷新一次再等（避免 Stripe / PayPal 偶发空白）
+        // 注意：reload 会清空已填字段，因此只用在该阶段朢早一个字段上
         const waitVisibleWithReload = async (selector, {
             firstWaitMs = 30000,
             secondWaitMs = 30000,
@@ -1201,7 +1200,7 @@ async function run() {
                 await loc.waitFor({ state: 'visible', timeout: firstWaitMs });
                 return true;
             } catch (_) {
-                console.log(`馃攧 [姝ラ] 鍏冪礌 ${selector} ${firstWaitMs}ms 鏈覆鏌擄紝鍒锋柊椤甸潰鍚庨噸璇?..`);
+                console.log(`⚠️ [步骤] ${selector} 在 ${firstWaitMs}ms 内未出现，刷新后重试...`);
                 try {
                     if (reloadGotoUrl) {
                         await page.goto(reloadGotoUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -1210,14 +1209,14 @@ async function run() {
                     }
                     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => { });
                 } catch (e) {
-                    console.warn(`鈿狅笍 [姝ラ] 鍒锋柊澶辫触: ${e.message}`);
+                    console.warn(`⚠️ [步骤] 刷新失败: ${e.message}`);
                 }
                 await loc.waitFor({ state: 'visible', timeout: secondWaitMs });
                 return true;
             }
         };
 
-        // Phase 3C: 濉啓琛ㄥ崟
+        // Phase 3C: 填写表单
         async function afterFieldTransition(page, fieldName) {
             if (Math.random() < 0.5) {
                 const driftX = page.lastMouseX + randomDelay(-80, 80);
@@ -1269,11 +1268,11 @@ async function run() {
             }
             return false;
         };
-        let addressAutoFilled = false; // 鍦板潃涓嬫媺閫変腑鍚庤烦杩?zip/city 濉啓
+        let addressAutoFilled = false; // 地址联想已自动补全 zip/city 等字段
         const fillAddress = async () => {
-            console.log("馃摑 [姝ラ] 姝ｅ湪濉啓 Stripe 琛楅亾鍦板潃...");
+            console.log("📝 [步骤] 正在填写 Stripe 街道地址...");
 
-            // 琛楅亾鍦板潃鏄?Stripe 琛ㄥ崟鐨勬牳蹇冨瓧娈碉細30s 娌″嚭鐜板垯鍒锋柊涓€娆″啀绛?30s
+            // 等待 Stripe 地址输入框出现；首次等 30s，不行则刷新后再等 30s
             await waitVisibleWithReload('#billingAddressLine1', {
                 firstWaitMs: 30000,
                 secondWaitMs: 30000,
@@ -1282,10 +1281,10 @@ async function run() {
 
             await humanFillInput(page, page.locator('#billingAddressLine1'), CONFIG.billing.address);
 
-            // 绛夊緟涓€涓嬶紝鐪?Stripe 鍦板潃鑷姩琛ュ叏涓嬫媺鏄惁鍑虹幇
+            // 等待一下，让 Stripe 地址联想下拉有机会出现
             await page.waitForTimeout(randomDelay(800, 1500));
 
-            // Stripe 鍦板潃琛ュ叏涓嬫媺鐨勫父瑙侀€夋嫨鍣?
+            // Stripe 地址联想下拉候选
             const dropdownSelectors = [
                 '.AddressAutocomplete-option',
                 '[data-testid="address-autocomplete-option"]',
@@ -1302,23 +1301,23 @@ async function run() {
                     const option = page.locator(sel).first();
                     const visible = await option.isVisible().catch(() => false);
                     if (visible) {
-                        console.log(`鉁?[鍦板潃] 妫€娴嬪埌鍦板潃琛ュ叏涓嬫媺 (${sel})锛屾鍦ㄩ€夋嫨绗竴椤?..`);
+                        console.log(`ℹ️ [地址] 检测到地址补全下拉 (${sel})，正在选择...`);
                         await page.keyboard.press('ArrowDown');
                         await page.waitForTimeout(randomDelay(200, 400));
                         await page.keyboard.press('Enter');
                         dropdownFound = true;
-                        addressAutoFilled = true; // Stripe 浼氳嚜鍔ㄥ～鍏?zip/city
+                        addressAutoFilled = true; // Stripe 已自动补全 zip/city
                         await page.waitForTimeout(randomDelay(400, 800));
                         break;
                     }
-                } catch (_) { /* 缁х画灏濊瘯涓嬩竴涓?selector */ }
+                } catch (_) { /* 继续尝试下一个 selector */ }
             }
             await page.waitForTimeout(2000);
             if (!dropdownFound) {
                 await expandStripeManualAddressFields();
-                // 娌℃湁涓嬫媺妗嗭細鐐逛竴涓嬮〉闈㈤《閮ㄥ畨鍏ㄧ殑绌虹櫧鍖哄煙锛岃鍦板潃妗嗗け鐒?
-                // (闈欓粯) 鍦板潃琛ュ叏涓嬫媺鏈嚭鐜?
-                // 鐐瑰嚮椤甸潰椤堕儴鍖哄煙锛堣繙绂昏〃鍗曪紝涓嶄細璇Е鍏朵粬杈撳叆妗嗭級
+                // 没有地址联想下拉时，尽量让手动字段展开并失焦
+                // (模拟) 点击页面空白处
+                // 点击页面顶部区域（远离表单，不会误触其他输入框）
                 const safeX = randomDelay(800, 1100);
                 const safeY = randomDelay(30, 80);
                 await page.mouse.move(safeX, safeY, { steps: 20 });
@@ -1334,7 +1333,7 @@ async function run() {
             await afterFieldTransition(page, 'address');
         };
         const fillName = async () => {
-            console.log("馃摑 [姝ラ] 姝ｅ湪濉啓 Stripe 璐﹀崟濮撳悕...");
+            console.log("📝 [步骤] 正在填写 Stripe 账单姓名...");
             const nameInput = page.locator('#billingName').first();
             try {
                 await nameInput.waitFor({ state: 'attached', timeout: 1000 });
@@ -1343,14 +1342,14 @@ async function run() {
                     console.log("✅ [步骤] 姓名填写完成。");
                     await afterFieldTransition(page, 'name');
                 }
-            } catch (error) { console.log('鈴?濮撳悕杈撳叆妗嗕笉瀛樺湪锛屽凡璺宠繃'); }
+            } catch (error) { console.log('⏩ 姓名输入框不存在，已跳过'); }
         };
         const fillZipAndCity = async () => {
             if (addressAutoFilled) {
-                console.log("? [??] ???????????????????");
+                console.log("ℹ️ [步骤] 地址联想已自动补全，跳过邮编与城市填写。");
                 return;
             }
-            console.log("?? [??] ???? Stripe ?????...");
+            console.log("📝 [步骤] 正在填写 Stripe 邮编与城市...");
             await expandStripeManualAddressFields();
 
             const zipLoc = page.locator('#billingPostalCode, #billingAddressPostalCode, input[name="billingPostalCode"], input[name="billingAddressPostalCode"]').first();
@@ -1359,7 +1358,7 @@ async function run() {
             const cityVisible = await isFillableStripeField(cityLoc);
 
             if (!zipVisible && !cityVisible) {
-                console.log("? [??] ?? Stripe ??/??????????????????????");
+                console.log("⏩ [步骤] 当前 Stripe 邮编/城市字段不可直接填写（隐藏或不存在），跳过。");
                 return;
             }
 
@@ -1389,17 +1388,17 @@ async function run() {
             [fillAddress, fillZipAndCity, fillName],
         ];
         const chosenOrder = fillOrders[Math.floor(Math.random() * fillOrders.length)];
-        // (闈欓粯) 鎷熶汉濉啓椤哄簭
+        // (静默) 拟人填写顺序
         for (const fillFn of chosenOrder) {
             await fillFn();
             if (Math.random() < 0.3) {
-                // (闈欓粯) 榧犳爣婕父
+                // (静默) 鼠标漫游
                 await continuousHumanRoam(page, randomDelay(1000, 2000));
             }
         }
 
-        // Phase 3D: 鍕鹃€夊崗璁?
-        // (闈欓粯) 妫€鏌ュ凡濉唴瀹?
+        // Phase 3D: 勾选协议
+        // (模拟) 阅读协议
         await page.waitForTimeout(randomDelay(1000, 2500));
         if (Math.random() < 0.3) {
             await page.mouse.wheel(0, randomDelay(-100, -40));
@@ -1407,7 +1406,7 @@ async function run() {
             await page.mouse.wheel(0, randomDelay(60, 120));
             await page.waitForTimeout(randomDelay(500, 1000));
         }
-        // Stripe 鐜板湪澶氫簡涓€涓?"Save my payment information" 澶嶉€夋锛屽師 .Checkbox-Input 浼氬悓鏃跺尮閰嶄袱涓紝瑙﹀彂 strict mode 杩濊
+        // Stripe 有时把 "Save my payment information" 也渲染成 .Checkbox-Input，这里优先命中真正的协议框，避免 strict mode 误点
         let checkbox = page.locator('#termsOfServiceConsentCheckbox').first();
         if (!(await checkbox.isVisible().catch(() => false))) {
             checkbox = page.locator('.Checkbox-Input').last();
@@ -1429,8 +1428,8 @@ async function run() {
         }
         await page.waitForTimeout(randomDelay(600, 1500));
 
-        // Phase 3E: 鎻愪氦鎸夐挳 鈥斺€?鏋佽嚧鎷熶汉鍖栫偣鍑?
-        // (闈欓粯) 鎻愪氦鍓嶆极娓?
+        // Phase 3E: 提交前巡视 - 模拟临门一脚前的停顿
+        // (模拟) 最后观察
         await continuousHumanRoam(page, randomDelay(1500, 3000));
         await mouseBreathing(page, randomDelay(500, 1000));
         console.log("🔔 [步骤] 正在准备提交 Stripe Checkout...");
@@ -1454,37 +1453,37 @@ async function run() {
             const btnCenterX = box.x + box.width / 2;
             const btnCenterY = box.y + box.height / 2;
 
-            // === Step 1: 瑙嗙嚎鍏堢Щ鍒版寜閽笂鏂瑰尯鍩燂紙涓嶆槸绮惧噯鐬勫噯锛屽儚鍦ㄧ湅椤甸潰涓嬫柟锛?
+            // === Step 1: 先把视线移到按钮上方，像人在确认按钮文案 ===
             const glanceX = box.x + randomDelay(-60, box.width + 60);
             const glanceY = box.y - randomDelay(60, 140);
             await page.mouse.move(glanceX, glanceY, { steps: randomDelay(25, 40) });
             page.lastMouseX = glanceX; page.lastMouseY = glanceY;
-            await page.waitForTimeout(randomDelay(600, 1400)); // 鍍忓湪"璇?鎸夐挳涓婃柟鐨勬枃瀛?
+            await page.waitForTimeout(randomDelay(600, 1400)); // 上方短暂停留
 
-            // === Step 2: 榧犳爣鎱㈡參婊戝悜鎸夐挳锛堝姬褰㈢Щ鍔紝缁忚繃鎸夐挳宸︿晶锛?
-            const midX = box.x - randomDelay(10, 50); // 浠庡乏杈瑰姬绾胯繘鍏?
+            // === Step 2: 从按钮侧边切入，避免直线贴脸移动 ===
+            const midX = box.x - randomDelay(10, 50); // 先停在按钮左侧
             const midY = box.y + randomDelay(5, box.height - 5);
             await page.mouse.move(midX, midY, { steps: randomDelay(15, 25) });
             page.lastMouseX = midX; page.lastMouseY = midY;
             await page.waitForTimeout(randomDelay(200, 500));
 
-            // === Step 3: 鏈€缁堝畾浣嶅埌鎸夐挳涓婏紙杞诲井鍋忕涓績锛岀湡浜轰笉浼氱簿鍑嗙偣涓績锛?
+            // === Step 3: 再缓慢移到按钮内部的随机点 ===
             const clickX = btnCenterX + randomDelay(-Math.floor(box.width * 0.3), Math.floor(box.width * 0.3));
             const clickY = btnCenterY + randomDelay(-Math.floor(box.height * 0.3), Math.floor(box.height * 0.3));
             await page.mouse.move(clickX, clickY, { steps: randomDelay(10, 18) });
             page.lastMouseX = clickX; page.lastMouseY = clickY;
 
-            // === Step 4: 鎮仠鍦ㄦ寜閽笂锛屽仠椤匡紙鐘硅鲍鎰燂紝鐪熶汉浼氬仠涓€涓嬪啀鐐癸級
+            // === Step 4: 点击前再停顿一下，模拟犹豫 ===
             await page.waitForTimeout(randomDelay(400, 1000));
 
-            // === Step 5: 25% 姒傜巼"鍙嶆倲涓€涓? 鈥斺€?榧犳爣婧滆蛋鍐嶅洖鏉?
+            // === Step 5: 25% 概率先轻微游移一次 ===
             if (Math.random() < 0.25) {
-                // (闈欓粯) 鐘硅鲍妯℃嫙
+                // (模拟) 小幅游移
                 const wanderX = clickX + randomDelay(-80, 80);
                 const wanderY = clickY + randomDelay(20, 80);
                 await page.mouse.move(wanderX, wanderY, { steps: 12 });
                 await page.waitForTimeout(randomDelay(500, 1200));
-                // 鍐嶇Щ鍥炴潵
+                // 再移回按钮
                 await page.mouse.move(
                     btnCenterX + randomDelay(-10, 10),
                     btnCenterY + randomDelay(-5, 5),
@@ -1493,14 +1492,14 @@ async function run() {
                 await page.waitForTimeout(randomDelay(200, 500));
             }
 
-            // === Stripe ???????? ===
+            // === Stripe 提交前完整性校验 ===
             const validateStripeCompleteness = async (page) => {
                 const criticalSelectors = [
-                    { selectors: ["#billingName"], name: "??", val: CONFIG.billing.name },
-                    { selectors: ["#billingAddressLine1"], name: "????", val: CONFIG.billing.address },
-                    { selectors: ["#billingLocality", "#billingAddressCity", "input[name=\"billingLocality\"]", "input[name=\"billingAddressCity\"]"], name: "??", val: CONFIG.billing.city },
-                    { selectors: ["#billingAdministrativeArea", "#billingAddressState", "input[name=\"billingAdministrativeArea\"]", "input[name=\"billingAddressState\"]", "select[name=\"billingAdministrativeArea\"]", "select[name=\"billingAddressState\"]"], name: "?/?", val: CONFIG.billing.state },
-                    { selectors: ["#billingPostalCode", "input[name=\"billingPostalCode\"]"], name: "??", val: CONFIG.billing.zip }
+                    { selectors: ["#billingName"], name: "姓名", val: CONFIG.billing.name },
+                    { selectors: ["#billingAddressLine1"], name: "街道地址", val: CONFIG.billing.address },
+                    { selectors: ["#billingLocality", "#billingAddressCity", "input[name=\"billingLocality\"]", "input[name=\"billingAddressCity\"]"], name: "城市", val: CONFIG.billing.city },
+                    { selectors: ["#billingAdministrativeArea", "#billingAddressState", "input[name=\"billingAdministrativeArea\"]", "input[name=\"billingAddressState\"]", "select[name=\"billingAdministrativeArea\"]", "select[name=\"billingAddressState\"]"], name: "州/省", val: CONFIG.billing.state },
+                    { selectors: ["#billingPostalCode", "input[name=\"billingPostalCode\"]"], name: "邮编", val: CONFIG.billing.zip }
                 ];
                 await expandStripeManualAddressFields();
                 let refilledCount = 0;
@@ -1516,7 +1515,7 @@ async function run() {
                     if (!el) continue;
                     const val = await el.inputValue().catch(() => "");
                     if (!val || val.trim().length < 1) {
-                        console.warn("[!] [????] Stripe " + item.name + " ???????...");
+                        console.warn("[!] [校验] Stripe " + item.name + " 为空，紧急补填...");
                         const tagName = await el.evaluate((node) => String(node.tagName || "").toLowerCase()).catch(() => "");
                         if (tagName === "select") {
                             await el.selectOption({ label: item.val }).catch(async () => {
@@ -1530,11 +1529,11 @@ async function run() {
                     }
                 }
                 if (refilledCount === 0) {
-                    console.log("? [??] Stripe ???????");
+                    console.log("ℹ️ [步骤] Stripe 关键字段校验完成。");
                 }
             };
             await validateStripeCompleteness(page);
-            // ??????????????????????????????????
+            // 轻微回摆鼠标，避免点击后位置过于僵硬
             await page.mouse.move(
                 clickX + randomDelay(-3, 3),
                 clickY + randomDelay(-3, 3),
@@ -1542,15 +1541,15 @@ async function run() {
             );
         }
         await mouseBreathing(page, randomDelay(6000, 8000));
-        // Phase 4: PayPal 璐︽埛鍒涘缓
-        // 鍏堢瓑椤甸潰鍔犺浇锛屽埛鏂颁竴娆＄‘淇?PayPal 椤甸潰骞插噣锛屽啀妫€鏌ユ粦鍧?
-        console.log("鈴?[姝ラ] 绛夊緟璺宠浆鍒?PayPal 椤甸潰...");
+        // Phase 4: PayPal 账户创建
+        // 先等页面加载，刷新一次确认 PayPal 页面干净，再检查滑块
+        console.log("⏳ [步骤] 等待跳转到 PayPal 页面...");
         await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => { });
-        await solveSlider(); // PayPal 椤甸潰鐨勬粦鍧楁鏌?
+        await solveSlider(); // PayPal 页面的滑块检查
         await checkCriticalErrors();
-        console.log("鈴?[姝ラ] 姝ｅ湪绛夊緟 PayPal 鍒涘缓璐︽埛鎸夐挳鍑虹幇...");
-        // PayPal 鍋跺彂鍙覆鏌撻潤鎬佹杩庨〉锛?PayPal is the safer, easier way to pay" + 璐墿琚嬬浘鐗屽浘锛夛紝
-        // 姝ゆ椂鎸夐挳姘歌繙涓嶅嚭鐜般€傚鍒锋柊鍑犳缁?PayPal 閲嶆柊鎷夎处鎴疯〃鍗曠殑鏈轰細銆?
+        console.log("⏳ [步骤] 正在等待 PayPal 创建账户按钮出现...");
+        // PayPal 偶发只渲染静态欢迎页（"PayPal is the safer, easier way to pay" + 购物袋盾牌图）
+        // 此时按钮永远不出现；多刷新几次，给 PayPal 重新拉账户表单的机会
         const tryWaitCreateBtn = async (timeoutMs = 25000) => {
             try {
                 await page.getByRole('button', { name: 'Create an Account' }).waitFor({ state: 'visible', timeout: timeoutMs });
@@ -1566,7 +1565,7 @@ async function run() {
                 await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
                 await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => { });
             } catch (e) {
-                console.warn(`鈿狅笍 [姝ラ] 鍒锋柊澶辫触: ${e.message}`);
+                console.warn(`⚠️ [步骤] 刷新失败: ${e.message}`);
             }
             await solveSlider().catch(() => { });
             createBtnReady = await tryWaitCreateBtn(25000);
@@ -1574,21 +1573,21 @@ async function run() {
         if (!createBtnReady) {
             const currentUrl = page.url();
             if (currentUrl.includes('paypal.com/agreements/approve')) {
-                throw new Error(`PayPal 瀹℃壒椤靛崱浣忥細闀挎椂闂村仠鐣欏湪 agreements/approve锛屾湭鍑虹幇 Create an Account (URL: ${currentUrl})`);
+                throw new Error(`PayPal 已进入 agreements/approve 页面，但没有出现 Create an Account (URL: ${currentUrl})`);
             }
             throw new Error(`PayPal 未检测到创建账户表单（已刷新 ${refreshAttempts} 次仍只见欢迎页，URL=${currentUrl}）`);
         }
 
 
-        // 馃 鐪嬪埌鎸夐挳鍚庝笉鎬ョ潃鐐癸紝鍏堝仠椤夸竴涓嬶紙鍍忕湡浜轰竴鏍峰厛纭椤甸潰鍐呭锛?
+        // 🧠 看到按钮后不急着点，先停顿一下（像真人一样先确认页面内容）
         await page.waitForTimeout(randomDelay(1500, 3000));
         const createBtn = page.getByRole('button', { name: 'Create an Account' });
         await createBtn.click();
 
-        // 绛夐偖绠辫緭鍏ユ鍑虹幇
-        console.log("馃摑 [姝ラ] 姝ｅ湪濉啓 PayPal 鐧诲綍閭锛坒ast锛?..");
+        // 等邮箱输入框出现
+        console.log("📝 [步骤] 正在填写 PayPal 登录邮箱（fastMode）...");
         await page.waitForTimeout(randomDelay(1000, 2000));
-        // PayPal 瀛楁缁熶竴浣跨敤 fastMode锛氭嫙銆屽瘑鐮佺鐞嗗櫒绮樿创銆嶏紝閬垮厤 hCaptcha 璇嗗埆涓烘満鍣ㄤ汉
+        // PayPal 字段统一使用 fastMode：拟「密码管理器粘贴」，避免 hCaptcha 识别为机器人
         await humanFillInput(page, page.locator('#login_email'), CONFIG.billing.email, false, true);
         await page.waitForTimeout(randomDelay(500, 1200));
 
@@ -1598,12 +1597,12 @@ async function run() {
         await continueBtn.click({ force: true });
             console.log("✅ [步骤] 已提交邮箱，进入支付信息填写页。");
 
-        // 馃 绛夐〉闈㈡覆鏌撳畬鎴愬啀寮€濮嬪～琛紝鍍忕湡浜虹湅鍒版柊椤甸潰鍚庡厛鎵竴鐪?
+        // 🧠 等页面渲染完成再开始填表，像真人看到新页面后先扫一眼
         await page.waitForTimeout(randomDelay(2000, 3500));
 
-        // PayPal 鍦ㄣ€屽崱鍙枫€嶄箣鍓嶅彲鑳戒笅鍙戞粦鍧楁寫鎴橈紙#captcha__frame__bottom > .sliderContainer > .slider锛?
-        // 绛?#cardNumber 涔嬪墠鍏堝皾璇曡В涓€娆★紱濡傛灉杩樼湅涓嶅埌锛屽垯缁х画杞婊戝潡鐩村埌瑙ｅ紑鎴栬秴鏃?
-        console.log("鈴?[姝ラ] 绛夊緟鏀粯琛ㄥ崟娓叉煋锛堝鏈夋粦鍧楀皢鑷姩澶勭悊锛?..");
+        // PayPal 在“卡号”之前可能下发滑块挑战（#captcha__frame__bottom > .sliderContainer > .slider）
+        // 在 #cardNumber 出现之前先尝试解几次；如果还看不到，则继续轮询滑块直到解开或超时
+        console.log("⏳ [步骤] 正在等待银行卡输入区域出现...");
         const cardLocator = page.locator('#cardNumber');
         const cardWaitDeadline = Date.now() + 90_000;
         let cardReady = false;
@@ -1613,30 +1612,30 @@ async function run() {
             } catch (_) { }
             const solved = await solveSlider();
             if (solved) {
-                // 瑙ｅ畬婊戝潡鍚庣粰 PayPal 涓€鐐规椂闂撮噸娓叉煋
+                // 解完滑块后给 PayPal 一点时间重新渲染
                 await page.waitForTimeout(randomDelay(1500, 2500));
                 continue;
             }
             await page.waitForTimeout(800);
         }
         if (!cardReady) {
-            // 鍏滃簳锛氬啀灏濊瘯涓€娆℃樉寮?waitFor锛岃鍘熷鎶ラ敊涔熻兘琚埗杩涚▼鎹曟崏
+            // 兜底：再尝试一次显式 waitFor，让原始报错也能被父进程捕捉
             await cardLocator.waitFor({ state: 'visible', timeout: 5000 });
         }
 
-        console.log("馃摑 [姝ラ] 姝ｅ湪蹇€熷～鍐欒处鍗曚俊鎭紙PayPal 椋庢帶鍋忓ソ銆岀矘璐淬€嶈妭濂忥級...");
+        console.log("📝 [步骤] 正在填写 PayPal 支付信息...");
         await page.mouse.move(randomDelay(300, 700), randomDelay(200, 400), { steps: 15 });
         await page.waitForTimeout(randomDelay(400, 800));
 
         const billing = CONFIG.billing;
         const [first, last] = billing.name.split(' ');
 
-        // PayPal 鍏ㄩ儴瀛楁閮借蛋 fast / digits 妯″紡锛堢灛鏃?fill锛夛紝浠垮瘑鐮佺鐞嗗櫒鑷姩濉厖鑺傚
-        // 瀛楁闂村仠 200~500ms锛堣繙灏忎簬浜烘墜 800-1500ms锛夛紝鏇存帴杩?鑷姩濉厖 + 鐣ュ仠椤?鐨勭湡浜轰綋楠?
+        // PayPal 全部字段都走 fast / digits 模式（瞬时 fill），仿密码管理器自动填充节奏
+        // 字段间停 200~500ms（远小于人手 800-1500ms），更接近“自动填充 + 略停顿”的真人体验
         const paypalFieldOrder = Math.random() > 0.5 ? 'card_first' : 'name_first';
 
         const fillExpiryAndCvc = async () => {
-            // 鏈夋晥鏈?+ CVC 鐭暟瀛椾覆锛氱洿鎺ラ敭鐩?type锛圥ayPal 杩欎袱涓?input 澶氬甫 onInput 寮烘牸寮忓寲锛宲age.fill() 鍋跺彂琚埅鏂級
+            // 有效期 + CVC 短数字串：直接键盘 type（PayPal 这两个 input 多带 onInput 强格式化，page.fill() 偶发被截断）
             await page.keyboard.press('Tab');
             await page.waitForTimeout(randomDelay(120, 280));
             await page.keyboard.type(billing.expiry, { delay: randomDelay(20, 50) });
@@ -1678,8 +1677,8 @@ async function run() {
         }
             console.log("✅ [步骤] 银行卡与身份信息填写完成。");
 
-        // 鍦板潃锛堝甫涓嬫媺澶勭悊锛夆€斺€?鍦板潃涔熻蛋 fastMode锛涗笅鎷夋槸鍩轰簬 input 浜嬩欢瑙﹀彂鐨勶紝蹇€?fill 涓€鏍疯兘寮?
-        console.log("鉁嶏笍 [姝ラ] 姝ｅ湪杈撳叆鍦板潃骞跺鐞嗚仈鎯?..");
+        // 地址（带下拉处理）；地址也走 fastMode；下拉是基于 input 事件触发的，快速 fill 一样能触发
+        console.log("📝 [步骤] 正在填写 PayPal 账单地址...");
         const billingLine1 = page.locator('#billingLine1');
         if (await billingLine1.isVisible().catch(() => false)) {
             await humanFillInput(page, billingLine1, billing.address, false, true);
@@ -1696,15 +1695,15 @@ async function run() {
             await page.waitForTimeout(randomDelay(300, 700));
         }
 
-        // 鏄惧紡绛夊緟 PayPal 鎶?City/State/ZIP 杩欎笁涓瓧娈垫覆鏌撳嚭鏉ワ紙鏈€澶?8 绉掞級
-        // PayPal 鐨?AddressAutocompleteContainer 鏄?React 寮傛鍔犺浇锛屼笉绛夊氨 isVisible 浼氬亣鎬ц繑鍥?false
+        // 显式等待 PayPal 的 City/State/ZIP 这三个字段渲染出来（最多 8 秒）
+        // PayPal 的 AddressAutocompleteContainer 是 React 异步加载，不等就 isVisible 会假性返回 false
         try {
             await page.locator('#billingPostalCode, #billingCity, #billingState').first().waitFor({ state: 'visible', timeout: 8000 });
         } catch (_) {
             console.warn('⚠️ [步骤] PayPal City/State/ZIP 三件套 8s 内未渲染，将按现有 DOM 做兜底尝试');
         }
 
-        // 鍏滃簳濉?City / State / ZIP 鈥斺€?PayPal 娌¤嚜鍔ㄨˉ鍏ㄦ垨瀛楁淇濈暀涓虹┖鏃舵墜鍔ㄥ～
+        // 兜底填 City / State / ZIP - PayPal 没自动补全或字段保留为空时手动填
         const pickFirstVisible = async (selectors, perTryMs = 5000) => {
             for (const sel of selectors) {
                 const loc = page.locator(sel).first();
@@ -1721,13 +1720,13 @@ async function run() {
             for (let attempt = 1; attempt <= 3; attempt += 1) {
                 const cur = await loc.inputValue().catch(() => '');
                 if (cur && cur.trim() === String(value).trim()) {
-                    console.log(`鈴?[姝ラ] PayPal ${label} 宸蹭负鐩爣鍊? ${cur.trim()}`);
+                    console.log(`✅ [步骤] PayPal ${label} 已正确: ${cur.trim()}`);
                     return;
                 }
                 if (cur && cur.trim() && cur.trim() !== String(value).trim()) {
-                    console.log(`馃摑 [姝ラ] PayPal ${label} 褰撳墠鍊?${cur.trim()}锛岃鐩栦负鐩爣鍊?${value}锛堢${attempt}娆★級`);
+                    console.log(`🔁 [步骤] PayPal ${label} 当前为 ${cur.trim()}，准备改写为 ${value}（第${attempt}次）`);
                 } else {
-                    console.log(`馃摑 [姝ラ] PayPal 鍏滃簳濉?${label}: ${value}锛堢${attempt}娆★級`);
+                    console.log(`🔁 [步骤] PayPal 准备填写 ${label}: ${value}（第${attempt}次）`);
                 }
                 try {
                     await loc.click({ clickCount: 3 }).catch(() => { });
@@ -1741,30 +1740,30 @@ async function run() {
                         } catch (_) { }
                     }).catch(() => { });
                 } catch (e) {
-                    console.warn(`鈿狅笍 [姝ラ] PayPal ${label} fill 澶辫触: ${e.message}`);
+                    console.warn(`⚠️ [步骤] PayPal ${label} fill 失败: ${e.message}`);
                 }
                 await page.waitForTimeout(randomDelay(250, 500));
             }
             const finalVal = await loc.inputValue().catch(() => '');
             if (!finalVal || finalVal.trim() !== String(value).trim()) {
-                console.warn(`鈿狅笍 [姝ラ] PayPal ${label} 閲嶈瘯 3 娆″悗鍊间粛涓嶆纭細瀹為檯="${finalVal}" 鏈熸湜="${value}"`);
+                console.warn(`⚠️ [步骤] PayPal ${label} 重试 3 次后值仍不正确：实际="${finalVal}" 期望="${value}"`);
             }
         };
 
         // City
         const cityLoc = await pickFirstVisible(['#billingCity', '#city', 'input[name="city"]', 'input[name="billingCity"]']);
-        await fillUntilSet(cityLoc, billing.city, '鍩庡競');
+        await fillUntilSet(cityLoc, billing.city, '城市');
 
-        // State 鈥斺€?涓€鑸槸 <select>
+        // State - 一般是 <select>
         const stateLoc = await pickFirstVisible(['#billingState', '#state', 'select[name="state"]', 'select[name="billingState"]']);
         if (stateLoc) {
             for (let attempt = 1; attempt <= 3; attempt += 1) {
                 const cur = await stateLoc.inputValue().catch(() => '');
                 if (cur && cur.trim() === String(billing.state).trim()) {
-                    console.log(`鈴?[姝ラ] PayPal State 宸蹭负鐩爣鍊? ${cur}`);
+                    console.log(`✅ [步骤] PayPal State 已正确: ${cur}`);
                     break;
                 }
-                console.log(`馃摑 [姝ラ] PayPal ${attempt === 1 && !cur ? '鍏滃簳' : '閲嶈瘯'}閫?State: ${billing.state}`);
+                console.log(`🔁 [步骤] PayPal ${attempt === 1 && !cur ? '准备选择' : '重新选择'} State: ${billing.state}`);
                 try {
                     await stateLoc.selectOption({ value: billing.state }).catch(async () => {
                         await stateLoc.selectOption({ label: billing.state }).catch(() => { });
@@ -1776,7 +1775,7 @@ async function run() {
                         } catch (_) { }
                     }).catch(() => { });
                 } catch (e) {
-                    console.warn(`鈿狅笍 [姝ラ] PayPal State 閫夋嫨澶辫触: ${e.message}`);
+                    console.warn(`⚠️ [步骤] PayPal State 选择失败: ${e.message}`);
                 }
                 await page.waitForTimeout(randomDelay(250, 500));
             }
@@ -1790,14 +1789,14 @@ async function run() {
 
         await page.waitForTimeout(randomDelay(300, 700));
 
-        // 瀵嗙爜
-        console.log("馃攼 [姝ラ] 姝ｅ湪蹇€熷～鍐?PayPal 璐︽埛瀵嗙爜...");
+        // 密码
+        console.log("📝 [步骤] 正在填写 PayPal 账户密码...");
         await humanFillInput(page, page.locator('#password'), billing.paypalPassword, false, true);
         await page.waitForTimeout(randomDelay(400, 1000));
 
-        // --- 鎻愪氦鍓嶆晥楠屾満鍒?---
+        // --- 提交前校验机制 ---
         const validateForm = async (page, fields) => {
-            console.log("馃攳 [鏁堥獙] 姝ｅ湪杩涜鎻愪氦鍓嶆暟鎹畬鏁存€ф牎楠?..");
+            console.log("🔎 [步骤] 正在校验关键字段...");
             for (const field of fields) {
                 const locator = typeof field.selector === 'string' ? page.locator(field.selector) : field.selector;
                 if (await locator.isVisible().catch(() => false)) {
@@ -1811,18 +1810,18 @@ async function run() {
                     console.log(cleanActual, cleanExpected);
 
                     if (cleanActual !== cleanExpected && field.expectedValue !== "") {
-                        console.warn(`[!] [鏁堥獙澶辫触] ${field.name} 鏁版嵁涓嶄竴鑷? 棰勬湡: ${field.expectedValue}, 瀹為檯: ${actualValue}銆傛鍦ㄤ慨姝?..`);
+                        console.warn(`[!] [校验] ${field.name} 不一致! 预期: ${field.expectedValue}, 实际: ${actualValue}，重新补填...`);
                         await humanFillInput(page, locator, field.expectedValue, Boolean(field.digitsMode));
                         await page.waitForTimeout(500);
                     } else {
-                        console.log(`鉁?[鏁堥獙閫氳繃] ${field.name}`);
+                        console.log(`✅ [校验] ${field.name}`);
                     }
                 }
             }
         };
 
         const checkFields = [
-            { selector: '#cardNumber', expectedValue: billing.card, name: "閾惰鍗″彿", digitsMode: true },
+            { selector: '#cardNumber', expectedValue: billing.card, name: "银行卡号", digitsMode: true },
             { selector: '#expiryDate', expectedValue: billing.expiry, name: "有效期", digitsMode: true },
             { selector: '#cvv', expectedValue: billing.cvc, name: "安全码", digitsMode: true },
             { selector: '#phone', expectedValue: billing.smsPhone, name: "手机号", digitsMode: true },
@@ -1830,7 +1829,7 @@ async function run() {
 
         await validateForm(page, checkFields);
 
-        // 鎻愪氦鍓嶆渶鍚庢壂涓€鐪硷紙婊氬姩鏌ョ湅涓€涓嬶級
+        // 提交前最后扫一眼（滚动查看一下）
         if (Math.random() < 0.4) {
             await page.mouse.wheel(0, randomDelay(-80, 80));
             await page.waitForTimeout(randomDelay(500, 1000));
@@ -1844,8 +1843,8 @@ async function run() {
 
 
 
-        // Phase 5: 鐭俊楠岃瘉
-        console.log("鈴?[姝ラ] 姝ｅ湪妫€鏌ユ槸鍚﹁Е鍙戠煭淇￠獙璇?..");
+        // Phase 5: 短信验证
+        console.log("🔍 [步骤] 正在检查是否触发短信验证...");
         await page.waitForTimeout(5000);
         await checkCriticalErrors();
         const isSmsPage = await page.locator("input#otc_code, input[name='otc_code'], #password").first().isVisible();
@@ -1864,27 +1863,27 @@ async function run() {
         await page.waitForLoadState('networkidle');
         await checkCriticalErrors();
 
-        // Phase 6: 鏈€缁堢‘璁?
+        // Phase 6: 最终确认
         const finalSubmitBtn = page.locator("button:has-text('Agree and Continue'), button:has-text('Agree & Continue')").first();
-        console.log("鈴?[姝ラ] 姝ｅ湪绛夊緟鏈€缁堢‘璁ゆ寜閽?..");
+        console.log("⏳ [步骤] 正在等待最终确认按钮...");
         await page.waitForTimeout(5000);
         await page.waitForLoadState('networkidle');
-        await solveSlider(); // PayPal 椤甸潰鐨勬粦鍧楁鏌?
+        await solveSlider(); // PayPal 页面的滑块检查
         await checkCriticalErrors();
         try {
             await finalSubmitBtn.waitFor({ state: 'visible', timeout: 90000 });
         } catch (_) {
-            throw new Error('鎵嬫満鍙风煭淇￠獙璇佸紓甯革細PayPal鏈€缁堢‘璁よ秴鏃讹紙鐭俊鏈畬鎴愭垨椤甸潰鏈氨缁級');
+            throw new Error('未检测到最终确认按钮，PayPal 页面可能仍被风控或卡在中间态');
         }
-        // (闈欓粯) 鏈€缁堢‘璁ゆ寜閽凡鎵惧埌
+        // (静默) 最终确认按钮已找到
         await finalSubmitBtn.click({ force: true });
-        console.log("鈴?[缁撹处] 宸叉彁浜わ紝鐩戞祴鏀粯缁撴灉...");
+        console.log("📩 [步骤] 最终确认已提交，等待支付结果落地...");
 
-        // 鏀粯鎴愬姛 / 澶辫触鐨勫閲嶅垽瀹?
-        // 1) URL 璺冲埌 chatgpt.com锛堟渶缁堢洰鏍囷級鈫?鎴愬姛
-        // 2) Stripe 鏍囧噯鍥炶皟 redirect_status=succeeded 鈫?鎴愬姛
-        // 3) Stripe 鏍囧噯鍥炶皟 redirect_status=failed / canceled 鈫?绔嬪嵆澶辫触锛屼笉娴垂 50s
-        // 4) PayPal hostedchallenge / verifycard 鈫?绔嬪嵆澶辫触锛屽憡鐭ラ鎺ч┏鍥?
+        // 支付成功 / 失败的多重判定
+        // 1) URL 跳到 chatgpt.com（最终目标）=> 成功
+        // 2) Stripe 标准回调 redirect_status=succeeded => 成功
+        // 3) Stripe 标准回调 redirect_status=failed / canceled => 立即失败，不浪费 50s
+        // 4) PayPal hostedchallenge / verifycard => 立即失败，告知风控驳回
         const TIMEOUT = 60000;
         const checkPaymentResult = async () => {
             const currentUrl = String(page.url() || '');
@@ -1926,28 +1925,28 @@ async function run() {
         });
 
         if (paymentResult.ok) {
-            console.log(`    [+] 鏈€缁堟牎楠岋細鏀粯鎴愬姛! (${paymentResult.reason})`);
+            console.log(`    [+] 支付成功! (${paymentResult.reason})`);
             console.log("PAYMENT_SUCCESS");
         } else if (paymentResult.reason === 'stripe_redirect_failed' || paymentResult.reason === 'stripe_redirect_canceled') {
-            // 澶辫触鏄庣‘锛歅ayPal/Stripe 宸茬粡鍥炴墽澶辫触锛岀洿鎺ユ姏閿欒鐖惰繘绋嬫崲鍙烽噸璇?
-            throw new Error(`鏀粯澶辫触 (${paymentResult.reason})锛歅ayPal/Stripe 绔┏鍥烇紝URL=${paymentResult.url}`);
+            // 失败明确：PayPal/Stripe 已经回执失败，直接抛错让父进程换号重?
+            throw new Error(`支付失败 (${paymentResult.reason})：PayPal/Stripe 端驳回，URL=${paymentResult.url}`);
         } else if (paymentResult.reason === 'paypal_blocked') {
-            throw new Error(`鏀粯澶辫触 (paypal_blocked)锛歅ayPal 椋庢帶鎷︽埅锛孶RL=${paymentResult.url}`);
+            throw new Error(`支付失败 (paypal_blocked)：PayPal 风控拦截，URL=${paymentResult.url}`);
         } else {
-            console.log(`    [!] 鏈€缁堟牎楠岋細${paymentResult.reason} URL=${paymentResult.url}`);
+            console.log(`    [!] 支付未成功: ${paymentResult.reason} URL=${paymentResult.url}`);
             console.log('    [!] 支付结果检测失败，未命中成功标记。');
         }
     } catch (e) {
-        console.error("鉂?[杩愯鏃堕敊璇痌:", e.message);
+        console.error("❌ [运行时错误]:", e.message);
         try {
             await captureDebugScreenshot(context, page, 'error');
         } catch (err) {
-            console.error(`鈿狅笍 [绯荤粺] 寮傚父鎴浘淇濆瓨澶辫触: ${err.message}`);
+            console.error(`⚠️ [系统] 异常截图保存失败: ${err.message}`);
         }
         process.exit(1);
     } finally {
         if (stopInactivityWatcher) stopInactivityWatcher();
-        console.log("馃憢 [绯荤粺] 娴佺▼缁撴潫锛屾鍦ㄥ叧闂祻瑙堝櫒...");
+        console.log("👋 [系统] 流程结束，正在关闭浏览器...");
         await browser.close().catch(() => { });
     }
 }
