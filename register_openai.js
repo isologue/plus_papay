@@ -1011,7 +1011,10 @@ async function submitOtpWithRetry(page, email, maxAttempts = MAX_OTP_RETRIES, op
         await page.waitForTimeout(2000);
 
         if (await isUserAlreadyExistsPage(page)) {
-            throw new Error(USER_ALREADY_EXISTS_ERROR);
+            if (!allowExistingAccountSession) {
+                throw new Error(USER_ALREADY_EXISTS_ERROR);
+            }
+            console.warn('ℹ️  [账号] 检测到邮箱已注册，继续尝试获取 Session Token...');
         }
 
         if (!(await isOtpIncorrect(page))) {
@@ -1030,6 +1033,7 @@ const store = require('./mysql-store');
 
 async function runRegistrationFlow() {
     // (静默) Banner
+    const allowExistingAccountSession = String(process.env.ALLOW_EXISTING_ACCOUNT_SESSION || '0') === '1';
 
     const poolEmailId = Number(process.env.POOL_EMAIL_ID || 0) || 0;
     const rawPoolEmail = String(process.env.POOL_EMAIL || '').trim().toLowerCase();
@@ -1689,7 +1693,10 @@ async function runRegistrationFlow() {
 
         // 进入 OTP 阶段前先确诊：若仍处于 Operation timed out / 连接关闭页 / 已注册错误页，提前抛错避免空等
         if (await isUserAlreadyExistsPage(page)) {
-            throw new Error(USER_ALREADY_EXISTS_ERROR);
+            if (!allowExistingAccountSession) {
+                throw new Error(USER_ALREADY_EXISTS_ERROR);
+            }
+            console.warn('ℹ️  [账号] 检测到邮箱已注册，继续尝试获取 Session Token...');
         }
         if (await isOperationTimedOutPage()) {
             throw new Error('代理或网络持续超时（Operation timed out），需要换号/换代理');
@@ -1813,7 +1820,10 @@ async function runRegistrationFlow() {
             console.log("✅ [成功] 已检测到聊天输入框，确认进入主站。");
         } catch (e) {
             if (await isUserAlreadyExistsPage(page)) {
-                throw new Error(USER_ALREADY_EXISTS_ERROR);
+                if (!allowExistingAccountSession) {
+                    throw new Error(USER_ALREADY_EXISTS_ERROR);
+                }
+                console.warn('ℹ️  [账号] 检测到邮箱已注册，继续尝试获取 Session Token...');
             }
             const finalUrl = page.url();
             console.warn(`⚠️  [Warn] 未直接发现对话框，检查当前 URL: ${finalUrl}`);
@@ -1848,7 +1858,10 @@ async function runRegistrationFlow() {
                 });
                 await page.waitForTimeout(2000);
                 if (await isUserAlreadyExistsPage(page)) {
-                    throw new Error(USER_ALREADY_EXISTS_ERROR);
+                    if (!allowExistingAccountSession) {
+                        throw new Error(USER_ALREADY_EXISTS_ERROR);
+                    }
+                    console.warn('ℹ️  [账号] 检测到邮箱已注册，继续尝试获取 Session Token...');
                 }
                 if (!page.url().includes('chatgpt.com')) {
                     throw new Error('注册后未能成功进入主站页面');

@@ -2257,6 +2257,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                                 <th width="130px" style="text-align:center">占用</th>
                                 <th width="200px">注册时间</th>
                                 <th width="200px">Token 更新时间</th>
+                                <th width="150px" style="text-align:center">操作</th>
                             </tr>
                         </thead>
                         <tbody id="free_accounts_body"></tbody>
@@ -3450,6 +3451,10 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     : '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">缺失</span>';
                 const regAt = row.registered_at ? String(row.registered_at).replace('T', ' ').slice(0, 19) : '-';
                 const tokenAt = row.token_updated_at ? String(row.token_updated_at).replace('T', ' ').slice(0, 19) : '-';
+                const emailArg = JSON.stringify(String(row.email || ''));
+                const actionCell = row.has_access_token
+                    ? '<span style="color:var(--text-dim);">-</span>'
+                    : `<button type="button" class="btn btn-primary" style="padding:8px 12px;border-radius:10px;" onclick='refreshFreeAccountToken(${Number(row.id)}, ${emailArg})'><i data-lucide="refresh-cw"></i> 补 Token</button>`;
                 return `
                 <tr>
                     <td><code>${escapeHtml(row.email || '')}</code></td>
@@ -3457,6 +3462,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     <td style="text-align:center">${lockBadge}</td>
                     <td>${escapeHtml(regAt)}</td>
                     <td>${escapeHtml(tokenAt)}</td>
+                    <td style="text-align:center">${actionCell}</td>
                 </tr>`;
             }).join('');
             lucide.createIcons();
@@ -3552,6 +3558,70 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 btn.innerHTML = originalContent;
                 lucide.createIcons();
                 showMessage(error.message || '免费号生成启动失败', 'error');
+            }
+        }
+
+        async function refreshFreeAccountToken(id, email) {
+            const container = document.getElementById('free_account_gen_progress_container');
+            const bar = document.getElementById('free_account_gen_bar');
+            const percentText = document.getElementById('free_account_gen_percent');
+            const statusText = document.getElementById('free_account_gen_status');
+            if (!container || !bar || !percentText || !statusText) {
+                return;
+            }
+
+            container.style.display = 'block';
+            bar.style.width = '0%';
+            bar.style.background = 'linear-gradient(90deg,var(--accent),#a855f7)';
+            percentText.innerText = '0%';
+            statusText.innerText = `准备为 ${email} 补充 Token...`;
+
+            let socket = null;
+            let settled = false;
+            const finish = async (message, ok) => {
+                if (settled) return;
+                settled = true;
+                if (socket) {
+                    try { socket.close(); } catch (_) { }
+                }
+                statusText.innerText = message;
+                bar.style.background = ok ? 'var(--success)' : 'var(--danger)';
+                await loadFreeAccounts(false);
+            };
+
+            try {
+                const response = await authFetch(`/api/admin/free-accounts/${id}/refresh-token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success || !data.jobKey) {
+                    throw new Error(data.message || '补 Token 启动失败');
+                }
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                socket = new WebSocket(`${protocol}//${window.location.host}`);
+                socket.onopen = () => {
+                    socket.send(JSON.stringify({ type: 'subscribe', jobKey: data.jobKey }));
+                };
+                socket.onmessage = async (event) => {
+                    const payload = JSON.parse(event.data);
+                    if (payload.jobKey !== data.jobKey) return;
+                    const progress = Math.max(0, Math.min(100, Math.round(Number(payload.progress) || 0)));
+                    bar.style.width = `${progress}%`;
+                    percentText.innerText = `${progress}%`;
+                    if (payload.message) statusText.innerText = payload.message;
+                    if (payload.status === 'success') {
+                        await finish(payload.message || `${email} Token 补充成功`, true);
+                    } else if (payload.status === 'failed') {
+                        await finish(payload.message || `${email} Token 补充失败`, false);
+                    }
+                };
+                socket.onerror = () => {
+                    statusText.innerText = '连接异常，可在任务管理查看补 Token 进度';
+                };
+            } catch (error) {
+                showMessage(error.message || '补 Token 启动失败', 'error');
             }
         }
 

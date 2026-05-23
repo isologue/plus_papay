@@ -789,6 +789,9 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '', stopCheck 
         if (emailSource === 'pool') {
             poolSlot = await store.reservePoolEmail(ownerKey, {
                 includeRegisteredFree: options.includeRegisteredFree !== false,
+                includeRegisteredMissingToken: Boolean(options.includeRegisteredMissingToken),
+                allowUnregistered: options.allowUnregistered !== false,
+                targetId: Number(options.targetPoolEmailId || 0) || 0,
                 excludeIds: options.excludePoolEmailIds || []
             });
         }
@@ -858,6 +861,13 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '', stopCheck 
         childEnv.POOL_EMAIL_IMAP_HOST = String(await store.getAppConfigValue('pool_email_imap_host', 'outlook.office365.com')).trim() || 'outlook.office365.com';
         childEnv.POOL_EMAIL_INCLUDE_JUNK = String(await store.getAppConfigValue('pool_email_include_junk', '1')) === '1' ? '1' : '0';
         childEnv.POOL_EMAIL_KEEP_LOCKED = options.keepPoolReservation ? '1' : '0';
+        if (poolSlot.registered && !poolSlot.accessToken) {
+            childEnv.ALLOW_EXISTING_ACCOUNT_SESSION = '1';
+            onProgress({
+                progress: 11,
+                message: `已注册邮箱 ${poolSlot.email} 缺失 Token，正在重跑流程获取 Token...`
+            });
+        }
     } else if (poolSlot?.id) {
         // 命中了一行但没有任何可用凭证：把它释放，避免占着茅坑
         await store.releasePoolEmailReservation(poolSlot.id).catch(() => { });
@@ -1360,13 +1370,17 @@ async function createFreePoolAccount(progressCallback = () => { }, options = {})
     }, runtimeJobKey, stopCheck, {
         forceEmailSource: 'pool',
         includeRegisteredFree: false,
+        includeRegisteredMissingToken: true,
+        allowUnregistered: true,
+        targetPoolEmailId: Number(options.poolEmailId || 0) || 0,
         keepPoolReservation: false
     });
 
     return {
         success: true,
         email: result.email,
-        poolEmailId: result.poolEmailId || 0
+        poolEmailId: result.poolEmailId || 0,
+        mode: result.poolEmailId && result.emailSource === 'pool' && result.accessToken ? 'token_ready' : 'registered'
     };
 }
 

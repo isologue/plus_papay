@@ -1118,35 +1118,55 @@ async function reservePoolEmail(ownerKey = '', options = {}) {
     return withTransaction(async (connection) => {
         const staleThreshold = new Date(Date.now() - ASSET_LOCK_STALE_MS);
         const includeRegisteredFree = options.includeRegisteredFree !== false;
+        const includeRegisteredMissingToken = Boolean(options.includeRegisteredMissingToken);
+        const allowUnregistered = options.allowUnregistered !== false;
+        const targetId = Number(options.targetId || 0) || 0;
         const excludeIds = (options.excludeIds || [])
             .map((id) => Number(id))
             .filter((id) => Number.isFinite(id) && id > 0);
         const excludeSql = excludeIds.length
             ? `AND id NOT IN (${excludeIds.map(() => '?').join(',')})`
             : '';
-        const registeredClause = includeRegisteredFree
-            ? `AND (
-                   registered = 0
-                   OR (registered = 1 AND plus_registered = 0 AND access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0)
-               )`
-            : `AND registered = 0`;
+        const candidateClauses = [];
+        if (allowUnregistered) {
+            candidateClauses.push(`registered = 0`);
+        }
+        if (includeRegisteredFree) {
+            candidateClauses.push(`(registered = 1 AND plus_registered = 0 AND access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0)`);
+        }
+        if (includeRegisteredMissingToken) {
+            candidateClauses.push(`(registered = 1 AND plus_registered = 0 AND (access_token IS NULL OR LENGTH(TRIM(access_token)) = 0))`);
+        }
+        if (!candidateClauses.length) {
+            return null;
+        }
+        const candidateSql = `AND (${candidateClauses.join(' OR ')})`;
+        const targetSql = targetId ? 'AND id = ?' : excludeSql;
+        const priorityCases = [];
+        if (includeRegisteredMissingToken) {
+            priorityCases.push(`WHEN registered = 1 AND (access_token IS NULL OR LENGTH(TRIM(access_token)) = 0) THEN 0`);
+        }
+        if (includeRegisteredFree) {
+            priorityCases.push(`WHEN registered = 1 AND access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 1`);
+        }
+        if (allowUnregistered) {
+            priorityCases.push(`WHEN registered = 0 THEN 2`);
+        }
+        const orderSql = targetId
+            ? 'id ASC'
+            : `CASE ${priorityCases.join(' ')} ELSE 9 END, id ASC`;
         const [rows] = await connection.query(
             `SELECT id, email, password, client_id, refresh_token, access_token, registered, plus_registered
              FROM pool_emails
              WHERE is_active = 1
                AND plus_registered = 0
-               ${registeredClause}
-               ${excludeSql}
+               ${candidateSql}
+               ${targetSql}
                AND (in_use = 0 OR locked_at IS NULL OR locked_at < ?)
-             ORDER BY
-               CASE
-                 WHEN registered = 1 AND access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 0
-                 ELSE 1
-               END,
-               id ASC
+             ORDER BY ${orderSql}
              LIMIT 1
              FOR UPDATE SKIP LOCKED`,
-            [...excludeIds, staleThreshold]
+            [...(targetId ? [targetId] : excludeIds), staleThreshold]
         );
 
         if (!rows.length) {

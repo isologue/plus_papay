@@ -761,8 +761,9 @@ async function startAdminProductGenerationTask(count, options = {}) {
     return { task, workerCount, targetCount };
 }
 
-async function startAdminFreeAccountGenerationTask(count) {
-    const targetCount = Math.max(1, Math.min(Number(count) || 1, 100));
+async function startAdminFreeAccountGenerationTask(count, options = {}) {
+    const targetPoolEmailId = Number(options.targetPoolEmailId || 0) || 0;
+    const targetCount = targetPoolEmailId ? 1 : Math.max(1, Math.min(Number(count) || 1, 100));
     const task = await store.createTaskLog({
         tokenPreview: 'ADMIN_FREE_ACCOUNT_GEN',
         cdkCode: `ADMIN_FREE_ACCOUNT_GEN:${targetCount}`,
@@ -801,22 +802,46 @@ async function startAdminFreeAccountGenerationTask(count) {
         });
     };
 
-    logTask(task.jobKey, `🎬 免费号生成启动  count=${targetCount}`);
+    logTask(task.jobKey, `🎬 免费号生成启动  count=${targetCount}${targetPoolEmailId ? `  targetPoolEmailId=${targetPoolEmailId}` : ''}`);
 
     (async () => {
         try {
             for (let i = 1; i <= targetCount; i += 1) {
-                await publish(`正在生成第 ${i}/${targetCount} 个免费号...`, Math.max(1, Math.floor(((i - 1) * 100) / targetCount)));
+                await publish(
+                    targetPoolEmailId
+                        ? '正在重跑已注册邮箱流程，尝试补充 Token...'
+                        : `正在生成第 ${i}/${targetCount} 个免费号...`,
+                    Math.max(1, Math.floor(((i - 1) * 100) / targetCount))
+                );
                 const result = await createFreePoolAccount(async (progressData) => {
                     const itemProgress = Math.max(0, Math.min(99, Number(progressData.progress) || 0));
                     const progress = Math.max(1, Math.min(99, Math.floor((((i - 1) * 100) + itemProgress) / targetCount)));
-                    await publish(`第 ${i}/${targetCount} 个: ${progressData.message || '免费号生成中...'}`, progress);
-                }, { jobKey: task.jobKey });
+                    await publish(
+                        targetPoolEmailId
+                            ? (progressData.message || '正在补充 Token...')
+                            : `第 ${i}/${targetCount} 个: ${progressData.message || '免费号生成中...'}`,
+                        progress
+                    );
+                }, {
+                    jobKey: task.jobKey,
+                    poolEmailId: targetPoolEmailId
+                });
                 successCount += 1;
                 completed += 1;
-                logTask(task.jobKey, `第 ${i}/${targetCount} 个免费号生成成功 email=${result.email}`);
+                logTask(
+                    task.jobKey,
+                    targetPoolEmailId
+                        ? `免费号 Token 补充成功 email=${result.email}`
+                        : `第 ${i}/${targetCount} 个免费号生成成功 email=${result.email}`
+                );
             }
-            await publish(`成功生成 ${successCount} 个免费号`, 100, 'success');
+            await publish(
+                targetPoolEmailId
+                    ? '免费号 Token 补充成功'
+                    : `成功生成 ${successCount} 个免费号`,
+                100,
+                'success'
+            );
         } catch (error) {
             lastError = error.message || '未知错误';
             failedCount += 1;
@@ -1786,6 +1811,33 @@ app.post('/api/admin/free-accounts/generate', authenticateAdmin, async (req, res
             jobKey: launched.task.jobKey,
             workerCount: 1,
             message: `免费号生成任务已启动，共 ${count} 个`
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/free-accounts/:id/refresh-token', authenticateAdmin, async (req, res) => {
+    const poolEmailId = Number(req.params.id) || 0;
+    try {
+        await ensureStoreReady();
+        const maintenanceModeState = await store.getMaintenanceModeState();
+        if (maintenanceModeState.enabled) {
+            return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
+        }
+        const row = await store.getPoolEmailCredentials(poolEmailId);
+        if (!row || !row.registered || row.plusRegistered) {
+            return res.status(400).json({ success: false, message: '该邮箱当前不适合补 Token' });
+        }
+        if (String(row.accessToken || '').trim()) {
+            return res.status(400).json({ success: false, message: '该邮箱已存在 Token，无需补充' });
+        }
+        const launched = await startAdminFreeAccountGenerationTask(1, { targetPoolEmailId: poolEmailId });
+        res.json({
+            success: true,
+            jobKey: launched.task.jobKey,
+            workerCount: 1,
+            message: `已启动 ${row.email} 的 Token 补充流程`
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
