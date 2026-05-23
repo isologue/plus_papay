@@ -1562,6 +1562,10 @@
                 <i data-lucide="mail"></i>
                 <span>邮箱管理</span>
             </div>
+            <div class="nav-item" onclick="switchPage('free_accounts', this)">
+                <i data-lucide="badge-check"></i>
+                <span>免费号池</span>
+            </div>
             <div class="nav-item" onclick="switchPage('cdks', this)">
                 <i data-lucide="key"></i>
                 <span>CDK 管理</span>
@@ -2171,6 +2175,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                                 <th style="min-width:220px;">邮箱</th>
                                 <th width="120px" style="text-align:center">认证方式</th>
                                 <th width="130px" style="text-align:center">注册状态</th>
+                                <th width="130px" style="text-align:center">Plus</th>
+                                <th width="120px" style="text-align:center">Token</th>
                                 <th width="110px" style="text-align:center">占用</th>
                                 <th width="200px">注册时间</th>
                                 <th width="240px" style="text-align:center">操作</th>
@@ -2203,6 +2209,57 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     </table>
                 </div>
                 <p style="font-size: 13px; color: var(--text-dim); margin-top: 12px;">列表按服务端 INTERNALDATE / 信封日期从新到旧排序；垃圾箱需在「系统配置」中勾选包含 Junk。</p>
+            </div>
+        </div>
+
+        <!-- 免费号池 -->
+        <div id="free_accounts" class="page-view">
+            <div class="page-header">
+                <h1>免费号池</h1>
+                <p>已完成 OpenAI 注册、尚未完成 Plus 的邮箱账号；成品号生产会优先复用这里的账号 Token。</p>
+            </div>
+            <div class="panel">
+                <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <h2 class="panel-title">免费号生成</h2>
+                    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                        <input type="number" id="free_account_gen_count" value="1" min="1" max="100" class="asset-input" style="width:80px;">
+                        <button class="btn btn-primary" onclick="startFreeAccountGeneration(this)">
+                            <i data-lucide="play"></i>
+                            生成免费号
+                        </button>
+                        <button class="btn btn-success" onclick="loadFreeAccounts(true)">
+                            <i data-lucide="refresh-cw"></i>
+                            刷新列表
+                        </button>
+                    </div>
+                </div>
+                <div id="free_account_gen_progress_container" class="panel" style="display:none;margin-top:18px;background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.1);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;">
+                        <span id="free_account_gen_status" style="font-size:14px;color:var(--text-main);font-weight:600;">正在准备生成免费号...</span>
+                        <span id="free_account_gen_percent" style="font-size:14px;color:var(--accent);font-weight:700;">0%</span>
+                    </div>
+                    <div style="width:100%;height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;">
+                        <div id="free_account_gen_bar" style="width:0%;height:100%;background:linear-gradient(90deg,var(--accent),#a855f7);transition:width .3s ease;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="panel">
+                <h2 class="panel-title">免费号列表</h2>
+                <div class="table-wrapper" style="margin-top:20px;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="min-width:220px;">邮箱</th>
+                                <th width="130px" style="text-align:center">Token</th>
+                                <th width="130px" style="text-align:center">占用</th>
+                                <th width="200px">注册时间</th>
+                                <th width="200px">Token 更新时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="free_accounts_body"></tbody>
+                    </table>
+                </div>
+                <p id="free_accounts_empty_hint" style="display:none;margin-top:16px;color:var(--text-dim);">暂无免费号。请先在「邮箱管理」导入邮箱，再点击生成免费号。</p>
             </div>
         </div>
 
@@ -2473,6 +2530,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         let cdkPool = [];
         let productPool = [];
         let poolEmailsList = [];
+        let freeAccountsList = [];
         const selectedItems = {
             phone_pool: new Set(),
             card_pool: new Set(),
@@ -3166,6 +3224,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             if (pId === 'pool_emails') {
                 loadPoolEmails(false).catch(() => { });
             }
+            if (pId === 'free_accounts') {
+                loadFreeAccounts(false).catch(() => { });
+            }
         }
 
         function escapeHtml(str) {
@@ -3199,6 +3260,12 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 const regBadge = row.registered
                     ? '<span class="status-badge status-success">已注册</span>'
                     : '<span class="status-badge status-running">未注册</span>';
+                const plusBadge = row.plus_registered
+                    ? '<span class="status-badge status-success">已完成</span>'
+                    : '<span class="status-badge status-running">未完成</span>';
+                const tokenBadge = row.has_access_token
+                    ? '<span class="status-badge status-success">已保存</span>'
+                    : '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">缺失</span>';
                 const lockBadge = row.in_use
                     ? '<span class="status-badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">占用中</span>'
                     : '<span class="status-badge" style="opacity:.78;">空闲</span>';
@@ -3219,6 +3286,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     <td><code>${safeEmail}</code></td>
                     <td style="text-align:center">${pwdCell}</td>
                     <td style="text-align:center">${regBadge}</td>
+                    <td style="text-align:center">${plusBadge}</td>
+                    <td style="text-align:center">${tokenBadge}</td>
                     <td style="text-align:center">${lockBadge}</td>
                     <td>${escapeHtml(regAt)}</td>
                     <td style="text-align:center">
@@ -3353,6 +3422,133 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 await loadPoolEmails(false);
             } catch (error) {
                 showMessage(error.message || '删除失败', 'error');
+            }
+        }
+
+        function renderFreeAccountsTable() {
+            const tbody = document.getElementById('free_accounts_body');
+            const hint = document.getElementById('free_accounts_empty_hint');
+            if (!tbody) {
+                return;
+            }
+            if (!freeAccountsList.length) {
+                tbody.innerHTML = '';
+                if (hint) hint.style.display = 'block';
+                lucide.createIcons();
+                return;
+            }
+            if (hint) hint.style.display = 'none';
+            tbody.innerHTML = freeAccountsList.map((row) => {
+                const lockBadge = row.in_use
+                    ? '<span class="status-badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">占用中</span>'
+                    : '<span class="status-badge" style="opacity:.78;">空闲</span>';
+                const tokenBadge = row.has_access_token
+                    ? '<span class="status-badge status-success">已保存</span>'
+                    : '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">缺失</span>';
+                const regAt = row.registered_at ? String(row.registered_at).replace('T', ' ').slice(0, 19) : '-';
+                const tokenAt = row.token_updated_at ? String(row.token_updated_at).replace('T', ' ').slice(0, 19) : '-';
+                return `
+                <tr>
+                    <td><code>${escapeHtml(row.email || '')}</code></td>
+                    <td style="text-align:center">${tokenBadge}</td>
+                    <td style="text-align:center">${lockBadge}</td>
+                    <td>${escapeHtml(regAt)}</td>
+                    <td>${escapeHtml(tokenAt)}</td>
+                </tr>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        async function loadFreeAccounts(showToast = false) {
+            try {
+                const res = await authFetch('/api/admin/free-accounts');
+                const data = await res.json();
+                if (!res.ok || data.success === false) {
+                    throw new Error(data.message || '加载免费号列表失败');
+                }
+                freeAccountsList = Array.isArray(data.items) ? data.items : [];
+                renderFreeAccountsTable();
+                if (showToast) {
+                    showMessage('免费号列表已刷新', 'success');
+                }
+            } catch (error) {
+                showMessage(error.message || '加载免费号列表失败', 'error');
+            }
+        }
+
+        async function startFreeAccountGeneration(btn) {
+            const count = parseInt(document.getElementById('free_account_gen_count')?.value, 10) || 1;
+            const container = document.getElementById('free_account_gen_progress_container');
+            const bar = document.getElementById('free_account_gen_bar');
+            const percentText = document.getElementById('free_account_gen_percent');
+            const statusText = document.getElementById('free_account_gen_status');
+            if (!container || !bar || !percentText || !statusText || !btn) {
+                return;
+            }
+
+            btn.disabled = true;
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> 生成中...';
+            lucide.createIcons();
+            container.style.display = 'block';
+            bar.style.width = '0%';
+            percentText.innerText = '0%';
+            statusText.innerText = `准备生成 ${count} 个免费号...`;
+
+            let socket = null;
+            let settled = false;
+            const finish = async (message, ok) => {
+                if (settled) return;
+                settled = true;
+                if (socket) {
+                    try { socket.close(); } catch (_) { }
+                }
+                statusText.innerText = message;
+                bar.style.background = ok ? 'var(--success)' : 'var(--danger)';
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                lucide.createIcons();
+                await loadFreeAccounts(false);
+            };
+
+            try {
+                const response = await authFetch('/api/admin/free-accounts/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success || !data.jobKey) {
+                    throw new Error(data.message || '免费号生成启动失败');
+                }
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                socket = new WebSocket(`${protocol}//${window.location.host}`);
+                socket.onopen = () => {
+                    socket.send(JSON.stringify({ type: 'subscribe', jobKey: data.jobKey }));
+                };
+                socket.onmessage = async (event) => {
+                    const payload = JSON.parse(event.data);
+                    if (payload.jobKey !== data.jobKey) return;
+                    const progress = Math.max(0, Math.min(100, Math.round(Number(payload.progress) || 0)));
+                    bar.style.width = `${progress}%`;
+                    percentText.innerText = `${progress}%`;
+                    if (payload.message) statusText.innerText = payload.message;
+                    if (payload.status === 'success') {
+                        await finish(payload.message || `成功生成 ${count} 个免费号`, true);
+                    } else if (payload.status === 'failed') {
+                        await finish(payload.message || '免费号生成失败', false);
+                    }
+                };
+                socket.onerror = () => {
+                    statusText.innerText = '连接异常，可在任务管理查看进度';
+                };
+            } catch (error) {
+                container.style.display = 'none';
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                lucide.createIcons();
+                showMessage(error.message || '免费号生成启动失败', 'error');
             }
         }
 

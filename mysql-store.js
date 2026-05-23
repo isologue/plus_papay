@@ -207,6 +207,10 @@ async function ensureLegacyColumns() {
     await ensureColumn('product_assets', 'password', 'VARCHAR(255) NULL');
     await ensureColumn('pool_emails', 'client_id', "VARCHAR(128) NOT NULL DEFAULT ''");
     await ensureColumn('pool_emails', 'refresh_token', 'TEXT NULL');
+    await ensureColumn('pool_emails', 'access_token', 'TEXT NULL');
+    await ensureColumn('pool_emails', 'token_updated_at', 'TIMESTAMP NULL DEFAULT NULL');
+    await ensureColumn('pool_emails', 'plus_registered', 'TINYINT(1) NOT NULL DEFAULT 0');
+    await ensureColumn('pool_emails', 'plus_registered_at', 'TIMESTAMP NULL DEFAULT NULL');
 
     await ensureColumn('product_assets', 'imap_key', 'VARCHAR(64) NULL');
     await ensureColumn('product_assets', 'claimed_cdk', 'VARCHAR(32) NULL');
@@ -918,7 +922,7 @@ async function releaseStaleAssetLocks() {
         runExecute(
             `UPDATE pool_emails
              SET in_use = 0, locked_at = NULL, locked_by = NULL
-             WHERE registered = 0
+             WHERE plus_registered = 0
                AND in_use = 1
                AND (locked_at IS NULL OR locked_at < ?)`,
             [staleThreshold]
@@ -937,7 +941,7 @@ async function resetAllAssetLocks() {
     await Promise.all([
         runExecute(`UPDATE phone_assets SET in_use = 0, locked_at = NULL, locked_by = NULL WHERE in_use = 1`),
         runExecute(`UPDATE card_assets SET in_use = 0, locked_at = NULL, locked_by = NULL WHERE in_use = 1`),
-        runExecute(`UPDATE pool_emails SET in_use = 0, locked_at = NULL, locked_by = NULL WHERE registered = 0 AND in_use = 1`)
+        runExecute(`UPDATE pool_emails SET in_use = 0, locked_at = NULL, locked_by = NULL WHERE plus_registered = 0 AND in_use = 1`)
     ]);
 }
 
@@ -1033,7 +1037,8 @@ async function listPoolEmails() {
         `SELECT id, email,
                 CASE WHEN LENGTH(TRIM(password)) > 0 THEN 1 ELSE 0 END AS has_password,
                 CASE WHEN refresh_token IS NOT NULL AND LENGTH(TRIM(refresh_token)) > 0 THEN 1 ELSE 0 END AS has_oauth,
-                registered, registered_at, in_use, locked_at, is_active, created_at
+                CASE WHEN access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 1 ELSE 0 END AS has_access_token,
+                registered, registered_at, plus_registered, plus_registered_at, in_use, locked_at, is_active, created_at
          FROM pool_emails
          WHERE is_active = 1
          ORDER BY id ASC`
@@ -1044,8 +1049,35 @@ async function listPoolEmails() {
         email: row.email,
         has_password: Number(row.has_password || 0) === 1,
         has_oauth: Number(row.has_oauth || 0) === 1,
+        has_access_token: Number(row.has_access_token || 0) === 1,
         registered: Number(row.registered || 0) === 1,
         registered_at: row.registered_at,
+        plus_registered: Number(row.plus_registered || 0) === 1,
+        plus_registered_at: row.plus_registered_at,
+        in_use: Number(row.in_use || 0) === 1,
+        locked_at: row.locked_at,
+        created_at: row.created_at
+    }));
+}
+
+async function listFreePoolAccounts() {
+    const rows = await runQuery(
+        `SELECT id, email,
+                CASE WHEN access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 1 ELSE 0 END AS has_access_token,
+                registered_at, token_updated_at, in_use, locked_at, created_at
+         FROM pool_emails
+         WHERE is_active = 1
+           AND registered = 1
+           AND plus_registered = 0
+         ORDER BY id ASC`
+    );
+
+    return rows.map((row) => ({
+        id: row.id,
+        email: row.email,
+        has_access_token: Number(row.has_access_token || 0) === 1,
+        registered_at: row.registered_at,
+        token_updated_at: row.token_updated_at,
         in_use: Number(row.in_use || 0) === 1,
         locked_at: row.locked_at,
         created_at: row.created_at
@@ -1054,7 +1086,7 @@ async function listPoolEmails() {
 
 async function getPoolEmailCredentials(id) {
     const rows = await runQuery(
-        `SELECT id, email, password, client_id, refresh_token, registered, is_active
+        `SELECT id, email, password, client_id, refresh_token, access_token, registered, plus_registered, is_active
          FROM pool_emails
          WHERE id = ?
          LIMIT 1`,
@@ -1072,7 +1104,9 @@ async function getPoolEmailCredentials(id) {
         password: row.password || '',
         clientId: row.client_id || '',
         refreshToken: row.refresh_token || '',
-        registered: Number(row.registered || 0) === 1
+        accessToken: row.access_token || '',
+        registered: Number(row.registered || 0) === 1,
+        plusRegistered: Number(row.plus_registered || 0) === 1
     };
 }
 
@@ -1080,19 +1114,39 @@ async function deletePoolEmail(id) {
     await runExecute(`DELETE FROM pool_emails WHERE id = ?`, [Number(id)]);
 }
 
-async function reservePoolEmail(ownerKey = '') {
+async function reservePoolEmail(ownerKey = '', options = {}) {
     return withTransaction(async (connection) => {
         const staleThreshold = new Date(Date.now() - ASSET_LOCK_STALE_MS);
+        const includeRegisteredFree = options.includeRegisteredFree !== false;
+        const excludeIds = (options.excludeIds || [])
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+        const excludeSql = excludeIds.length
+            ? `AND id NOT IN (${excludeIds.map(() => '?').join(',')})`
+            : '';
+        const registeredClause = includeRegisteredFree
+            ? `AND (
+                   registered = 0
+                   OR (registered = 1 AND plus_registered = 0 AND access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0)
+               )`
+            : `AND registered = 0`;
         const [rows] = await connection.query(
-            `SELECT id, email, password, client_id, refresh_token
+            `SELECT id, email, password, client_id, refresh_token, access_token, registered, plus_registered
              FROM pool_emails
              WHERE is_active = 1
-               AND registered = 0
+               AND plus_registered = 0
+               ${registeredClause}
+               ${excludeSql}
                AND (in_use = 0 OR locked_at IS NULL OR locked_at < ?)
-             ORDER BY id ASC
+             ORDER BY
+               CASE
+                 WHEN registered = 1 AND access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0 THEN 0
+                 ELSE 1
+               END,
+               id ASC
              LIMIT 1
              FOR UPDATE SKIP LOCKED`,
-            [staleThreshold]
+            [...excludeIds, staleThreshold]
         );
 
         if (!rows.length) {
@@ -1112,7 +1166,10 @@ async function reservePoolEmail(ownerKey = '') {
             email: row.email,
             password: row.password || '',
             clientId: row.client_id || '',
-            refreshToken: row.refresh_token || ''
+            refreshToken: row.refresh_token || '',
+            accessToken: row.access_token || '',
+            registered: Number(row.registered || 0) === 1,
+            plusRegistered: Number(row.plus_registered || 0) === 1
         };
     });
 }
@@ -1126,25 +1183,47 @@ async function releasePoolEmailReservation(id) {
         `UPDATE pool_emails
          SET in_use = 0, locked_at = NULL, locked_by = NULL
          WHERE id = ?
-           AND registered = 0`,
+           AND plus_registered = 0`,
         [Number(id)]
     );
 }
 
-async function markPoolEmailRegistered(id) {
+async function markPoolEmailRegistered(id, accessToken = '', options = {}) {
     if (!id) {
+        return;
+    }
+
+    const keepLocked = Boolean(options.keepLocked);
+    const token = String(accessToken || '').trim();
+    await runExecute(
+        `UPDATE pool_emails
+         SET registered = 1,
+             registered_at = COALESCE(registered_at, CURRENT_TIMESTAMP),
+             access_token = CASE WHEN ? <> '' THEN ? ELSE access_token END,
+             token_updated_at = CASE WHEN ? <> '' THEN CURRENT_TIMESTAMP ELSE token_updated_at END,
+             in_use = CASE WHEN ? = 1 THEN in_use ELSE 0 END,
+             locked_at = CASE WHEN ? = 1 THEN locked_at ELSE NULL END,
+             locked_by = CASE WHEN ? = 1 THEN locked_by ELSE NULL END
+         WHERE id = ?`,
+        [token, token, token, keepLocked ? 1 : 0, keepLocked ? 1 : 0, keepLocked ? 1 : 0, Number(id)]
+    );
+}
+
+async function markPoolEmailPlusRegisteredByEmail(email) {
+    const value = String(email || '').trim().toLowerCase();
+    if (!value) {
         return;
     }
 
     await runExecute(
         `UPDATE pool_emails
-         SET registered = 1,
-             registered_at = CURRENT_TIMESTAMP,
+         SET plus_registered = 1,
+             plus_registered_at = COALESCE(plus_registered_at, CURRENT_TIMESTAMP),
              in_use = 0,
              locked_at = NULL,
              locked_by = NULL
-         WHERE id = ?`,
-        [Number(id)]
+         WHERE LOWER(email) = ?`,
+        [value]
     );
 }
 
@@ -1454,7 +1533,7 @@ async function addProduct(email, filePath, password = null, token = null, imapKe
     await runExecute(
         `INSERT INTO product_assets (email, file_path, password, token, imap_key) 
          VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), password = VALUES(password), token = VALUES(token), imap_key = COALESCE(VALUES(imap_key), imap_key)`,
+         ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), password = VALUES(password), token = COALESCE(VALUES(token), token), imap_key = COALESCE(VALUES(imap_key), imap_key)`,
         [email, filePath, password, token, imapKey]
     );
 }
@@ -1701,11 +1780,13 @@ module.exports = {
     deleteCardAsset,
     bulkImportPoolEmails,
     listPoolEmails,
+    listFreePoolAccounts,
     getPoolEmailCredentials,
     deletePoolEmail,
     reservePoolEmail,
     releasePoolEmailReservation,
     markPoolEmailRegistered,
+    markPoolEmailPlusRegisteredByEmail,
     getRuntimeAssets,
     reserveRuntimeAssets,
     releaseRuntimeAssets,

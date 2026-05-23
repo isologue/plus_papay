@@ -196,6 +196,9 @@ async function getLatestCode(email, maxRetries = 30, excludeCode = '', options =
             onBeforePoll: options.onBeforePoll || null
         });
     }
+    if (emailSource && emailSource !== 'random') {
+        throw new Error(`IMAP code polling is only available for random email source, current source: ${emailSource}`);
+    }
 
     console.log(`📨 [IMAP] 正在为 ${normalizedEmail} 获取验证码...`);
     const url = 'https://imap.chiyiyi.cloud/api/admin/all-messages?limit=15';

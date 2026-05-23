@@ -107,6 +107,11 @@ function normalizeCloudEmail(email) {
 
 async function getLatestCode(email, maxRetries = 24, excludeCode = '', options = {}) {
     const normalizedEmail = normalizeCloudEmail(email);
+    const emailSource = String(process.env.EMAIL_SOURCE || 'random').toLowerCase();
+    if (emailSource !== 'random') {
+        throw new Error(`IMAP code polling is only available for random email source, current source: ${emailSource || 'unset'}`);
+    }
+
     console.log(`📨 [IMAP] 正在为 ${normalizedEmail} 获取验证码...`);
     const url = 'https://imap.chiyiyi.cloud/api/admin/all-messages?limit=15';
     const onNoNewCodeFor30Seconds = typeof options.onNoNewCodeFor30Seconds === 'function'
@@ -1064,6 +1069,10 @@ async function runRegistrationFlow() {
 
     let email = '';
     let inboxJwt = '';
+    if (emailSource === 'pool' && !usePoolImap) {
+        throw new Error('邮箱池模式未收到可用预留邮箱凭证，停止注册，避免回退随机邮箱');
+    }
+
     if (usePoolImap) {
         email = rawPoolEmail;
         console.log(`📬 [邮箱池] 使用预留邮箱 ${email}`);
@@ -1882,7 +1891,9 @@ async function runRegistrationFlow() {
 
         if (poolEmailId) {
             try {
-                await store.markPoolEmailRegistered(poolEmailId);
+                await store.markPoolEmailRegistered(poolEmailId, sessionData.accessToken, {
+                    keepLocked: process.env.POOL_EMAIL_KEEP_LOCKED === '1'
+                });
                 console.log(`[邮箱池] 已标记为已注册 id=${poolEmailId}`);
             } catch (markErr) {
                 console.warn(`[邮箱池] 标记已注册失败: ${markErr.message}`);
@@ -1895,6 +1906,7 @@ async function runRegistrationFlow() {
             email,
             accessToken: sessionData.accessToken,
             emailSource,
+            poolEmailId: poolEmailId || 0,
             inboxJwt: inboxJwt || '',
             inboxApiBase: useInbox ? inboxApiBase : ''
         };

@@ -108,8 +108,12 @@ CREATE TABLE IF NOT EXISTS pool_emails (
     password VARCHAR(512) NOT NULL DEFAULT '',
     client_id VARCHAR(128) NOT NULL DEFAULT '',
     refresh_token TEXT NULL,
+    access_token TEXT NULL,
+    token_updated_at TIMESTAMP NULL DEFAULT NULL,
     registered TINYINT(1) NOT NULL DEFAULT 0,
     registered_at TIMESTAMP NULL DEFAULT NULL,
+    plus_registered TINYINT(1) NOT NULL DEFAULT 0,
+    plus_registered_at TIMESTAMP NULL DEFAULT NULL,
     in_use TINYINT(1) NOT NULL DEFAULT 0,
     locked_at TIMESTAMP NULL DEFAULT NULL,
     locked_by VARCHAR(64) NULL DEFAULT NULL,
@@ -118,5 +122,5 @@ CREATE TABLE IF NOT EXISTS pool_emails (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_pool_emails_email (email),
-    KEY idx_pool_emails_pick (registered, is_active, in_use, locked_at, id)
+    KEY idx_pool_emails_pick (plus_registered, registered, is_active, in_use, locked_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

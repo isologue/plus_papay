@@ -17,6 +17,7 @@ const CONFIG = {
 
 const IMAP_ADMIN_EMAIL_API = 'https://imap.chiyiyi.cloud/api/admin/emails';
 const OAUTH_ADD_PHONE_ERROR = '当前账号触发手机号验证';
+const POOL_EMAIL_EXHAUSTED_ERROR = '邮箱池无可用预留邮箱（资产池枯竭），停止生产';
 
 // 进程级 inbox 域名黑名单：被 API 拒绝过的域名，本进程内不再传给子进程
 // 重启 server 后会清空（管理员若改过 API 配置就会重试）
@@ -216,14 +217,37 @@ function analyzeProcessOutput(output, timedOut) {
         };
     }
 
+    if (normalized.includes('金额校验失败')) {
+        return {
+            status: 'failed',
+            message: '该账号无激活权限,请更换账号重试',
+            reachedPaypal: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('订单创建失败 (Status: 502)')
+        || normalized.includes('代理连接被对端断开')
+        || normalized.includes('default_proxy_used')
+        || normalized.includes('无法获取 PayPal 审批链接')) {
+        return {
+            status: 'retry',
+            message: '支付链接生成/打开失败，准备同账号重试',
+            reachedPaypal: false,
+            shouldRetry: true,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
     const noPermissionKeywords = [
         'Missing PayPal approval URL',
         'Missing PayPal approval URL / ba_token',
         '多次尝试后仍未获取到 PayPal 重定向 URL',
         '获取 PayPal 链接异常',
-        '无法获取 PayPal 审批链接',
-        '该账号无激活权限',
-        '金额校验失败'
+        '该账号无激活权限'
     ];
     const isNoPermission = noPermissionKeywords.some((keyword) => normalized.includes(keyword));
 
@@ -484,6 +508,7 @@ async function runActivationProcess(accessToken, cdk, runtimeAssets, runtimeJobK
 async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
     return new Promise((resolve, reject) => {
         const runtimeJobKey = String(options.runtimeJobKey || '');
+        const stopCheck = typeof options.stopCheck === 'function' ? options.stopCheck : null;
         const child = fork(scriptPath, args, {
             env,
             stdio: ['inherit', 'pipe', 'pipe', 'ipc']
@@ -505,8 +530,11 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
         let idleTimer = null;
         let timedOut = false;
         let childExited = false;
+        let stopTimer = null;
+        let stopKillRequested = false;
         const idleTimeoutMs = Math.max(0, Number(options.idleTimeoutMs) || 0);
         const timeoutErrorMessage = String(options.timeoutErrorMessage || '子进程执行超时');
+        const stopErrorMessage = String(options.stopErrorMessage || '已收到停止指令，终止当前子进程');
 
         const resolveOnce = (value) => {
             if (settled) {
@@ -520,6 +548,10 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
             if (idleTimer) {
                 clearTimeout(idleTimer);
                 idleTimer = null;
+            }
+            if (stopTimer) {
+                clearInterval(stopTimer);
+                stopTimer = null;
             }
             resolve(value);
         };
@@ -537,7 +569,24 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
                 clearTimeout(idleTimer);
                 idleTimer = null;
             }
+            if (stopTimer) {
+                clearInterval(stopTimer);
+                stopTimer = null;
+            }
             reject(error);
+        };
+
+        const killForStop = () => {
+            if (settled || childExited || stopKillRequested) {
+                return;
+            }
+            stopKillRequested = true;
+            childError = stopErrorMessage;
+            combinedOutput += `\n[STOP] ${stopErrorMessage}\n`;
+            console.warn(`[Activation Child] ${childLabel} stop requested, killing child`);
+            try {
+                child.kill('SIGKILL');
+            } catch (_) { }
         };
 
         const resetIdleTimer = () => {
@@ -560,6 +609,22 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
                 } catch (_) { }
             }, idleTimeoutMs);
         };
+
+        if (stopCheck) {
+            stopTimer = setInterval(() => {
+                if (settled || childExited) {
+                    if (stopTimer) {
+                        clearInterval(stopTimer);
+                        stopTimer = null;
+                    }
+                    return;
+                }
+                if (stopCheck()) {
+                    killForStop();
+                }
+            }, 1000);
+            stopTimer.unref?.();
+        }
 
         const scriptTag = path.basename(scriptPath);
         const emitStdoutLines = createLineEmitter((line) => {
@@ -605,6 +670,9 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
             if (!msg || typeof msg !== 'object') {
                 return;
             }
+            if (typeof options.onMessage === 'function') {
+                options.onMessage(msg);
+            }
             if (msg.type === 'status' && msg.message && process.send) {
                 process.send(msg);
             }
@@ -638,6 +706,10 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
 
         child.on('close', (code, signal) => {
             childExited = true;
+            if (stopTimer) {
+                clearInterval(stopTimer);
+                stopTimer = null;
+            }
             console.log(`[Activation Child] Closed ${childLabel} code=${code} signal=${signal || 'none'}`);
             runtimeLog.push({
                 jobKey: runtimeJobKey,
@@ -646,6 +718,24 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
                 text: `🏁 [子进程] 结束  ${childLabel}  code=${code}  signal=${signal || 'none'}`
             });
             if (settled) {
+                return;
+            }
+            if (stopCheck && stopCheck()) {
+                resolveOnce({
+                    success: false,
+                    analysis: {
+                        status: 'failed',
+                        message: stopErrorMessage,
+                        reachedPaypal: false,
+                        shouldRetry: false,
+                        deletePhone: false,
+                        deleteCard: false
+                    },
+                    output: combinedOutput,
+                    result: resultPayload,
+                    error: stopErrorMessage,
+                    timedOut: false
+                });
                 return;
             }
             if (resultPayload) {
@@ -679,7 +769,7 @@ async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
     });
 }
 
-async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
+async function runRegistrationProcess(onProgress, runtimeJobKey = '', stopCheck = null, options = {}) {
     let lastProgress = 5;
     let lastMessage = '正在准备注册账号...';
 
@@ -688,7 +778,7 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
 
     let emailSource = 'random';
     try {
-        emailSource = String(await store.getAppConfigValue('email_source', '')).toLowerCase();
+        emailSource = String(options.forceEmailSource || await store.getAppConfigValue('email_source', '')).toLowerCase();
         if (!['random', 'pool', 'inbox'].includes(emailSource)) {
             const legacy = String(await store.getAppConfigValue('pool_email_enabled', '0')) === '1';
             emailSource = legacy ? 'pool' : 'random';
@@ -697,10 +787,13 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
 
     try {
         if (emailSource === 'pool') {
-            poolSlot = await store.reservePoolEmail(ownerKey);
+            poolSlot = await store.reservePoolEmail(ownerKey, {
+                includeRegisteredFree: options.includeRegisteredFree !== false,
+                excludeIds: options.excludePoolEmailIds || []
+            });
         }
     } catch (err) {
-        console.warn(`[Registration] 邮箱池预留失败，回退随机邮箱: ${err.message}`);
+        throw new Error(`邮箱池预留失败（资产池枯竭），停止生产: ${err.message}`);
     }
 
     const childEnv = { ...process.env };
@@ -736,6 +829,26 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
         }
     }
 
+    if (emailSource === 'pool' && !poolSlot) {
+        throw new Error(POOL_EMAIL_EXHAUSTED_ERROR);
+    }
+
+    if (poolSlot?.registered && poolSlot.accessToken && !poolSlot.plusRegistered) {
+        const email = String(poolSlot.email || '').trim().toLowerCase();
+        onProgress({
+            progress: 20,
+            message: `复用免费号: ${email}，准备进入激活阶段...`
+        });
+        return {
+            email,
+            accessToken: poolSlot.accessToken,
+            emailSource: 'pool',
+            poolEmailId: poolSlot.id,
+            poolReservationHeld: true,
+            reusedPoolAccount: true
+        };
+    }
+
     if (poolSlot && poolSlot.email && (poolSlot.refreshToken || poolSlot.password)) {
         childEnv.POOL_EMAIL_ID = String(poolSlot.id);
         childEnv.POOL_EMAIL = poolSlot.email;
@@ -744,10 +857,12 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
         childEnv.POOL_EMAIL_REFRESH_TOKEN = poolSlot.refreshToken || '';
         childEnv.POOL_EMAIL_IMAP_HOST = String(await store.getAppConfigValue('pool_email_imap_host', 'outlook.office365.com')).trim() || 'outlook.office365.com';
         childEnv.POOL_EMAIL_INCLUDE_JUNK = String(await store.getAppConfigValue('pool_email_include_junk', '1')) === '1' ? '1' : '0';
+        childEnv.POOL_EMAIL_KEEP_LOCKED = options.keepPoolReservation ? '1' : '0';
     } else if (poolSlot?.id) {
         // 命中了一行但没有任何可用凭证：把它释放，避免占着茅坑
         await store.releasePoolEmailReservation(poolSlot.id).catch(() => { });
         poolSlot = null;
+        throw new Error('邮箱池预留邮箱缺少可用凭证（资产池枯竭），停止生产');
     }
 
     try {
@@ -771,7 +886,8 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
         }, {
             idleTimeoutMs: CONFIG.CHILD_IDLE_TIMEOUT_MS,
             timeoutErrorMessage: '注册阶段超过 60 秒无打印，已终止并准备重试',
-            runtimeJobKey: String(runtimeJobKey || '')
+            runtimeJobKey: String(runtimeJobKey || ''),
+            stopCheck
         });
 
         if (!result.result || !result.result.email || !result.result.accessToken) {
@@ -779,7 +895,11 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
         }
 
         onProgress({ progress: 20, message: `账号注册成功: ${result.result.email}，准备开始激活...` });
-        return result.result;
+        return {
+            ...result.result,
+            poolEmailId: result.result.poolEmailId || poolSlot?.id || 0,
+            poolReservationHeld: Boolean(options.keepPoolReservation && (result.result.poolEmailId || poolSlot?.id))
+        };
     } catch (error) {
         if (poolSlot?.id) {
             await store.releasePoolEmailReservation(poolSlot.id).catch(() => { });
@@ -788,7 +908,7 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '') {
     }
 }
 
-async function runProtocolProcess(email, onProgress, runtimeJobKey = '', inboxBundle = {}) {
+async function runProtocolProcess(email, onProgress, runtimeJobKey = '', inboxBundle = {}, stopCheck = null) {
     let lastError = '';
 
     let randomDomainCfg = 'chiyiyi.cloud';
@@ -829,7 +949,8 @@ async function runProtocolProcess(email, onProgress, runtimeJobKey = '', inboxBu
         }, {
             idleTimeoutMs: CONFIG.CHILD_IDLE_TIMEOUT_MS,
             timeoutErrorMessage: '协议提取阶段超过 60 秒无打印，已终止并准备重试',
-            runtimeJobKey: String(runtimeJobKey || '')
+            runtimeJobKey: String(runtimeJobKey || ''),
+            stopCheck
         });
 
         if (result.result && result.result.fileName && result.result.filePath) {
@@ -857,6 +978,13 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
     let accountAttempt = 0;
     let topupFailureCount = 0;
     const runtimeJobKey = String(options.jobKey || '');
+    const skippedPoolEmailIds = new Set();
+    const stopCheck = typeof options.stopCheck === 'function' ? options.stopCheck : null;
+    const ensureNotStopped = () => {
+        if (stopCheck && stopCheck()) {
+            throw new Error('管理员已停止成品批量生产');
+        }
+    };
     const ownerKey = `prod:${cdk || 'admin'}:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     runtimeLog.push({
@@ -867,18 +995,36 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
     });
 
     while (accountAttempt < CONFIG.MAX_ACCOUNT_RETRIES) {
+        ensureNotStopped();
         accountAttempt += 1;
         progressCallback({
             progress: 5,
             message: `正在尝试注册第 ${accountAttempt} 个账号...`
         });
 
+        let releaseCurrentPoolEmail = async () => { };
         try {
             console.log(`[Product] Attempt ${accountAttempt}: Registering...`);
             const regResult = await runRegistrationProcess((payload) => {
                 progressCallback(payload);
-            }, runtimeJobKey);
+            }, runtimeJobKey, stopCheck, {
+                includeRegisteredFree: true,
+                keepPoolReservation: true,
+                excludePoolEmailIds: Array.from(skippedPoolEmailIds)
+            });
+            ensureNotStopped();
             const { email, accessToken } = regResult;
+            const poolEmailId = Number(regResult.poolEmailId || 0) || 0;
+            let poolReservationHeld = Boolean(regResult.poolReservationHeld && poolEmailId);
+            releaseCurrentPoolEmail = async () => {
+                if (!poolReservationHeld || !poolEmailId) {
+                    return;
+                }
+                await store.releasePoolEmailReservation(poolEmailId).catch((err) => {
+                    console.warn(`[Product] release pool email failed: ${err.message}`);
+                });
+                poolReservationHeld = false;
+            };
             // 注册阶段建立的邮箱后端凭证，要带给 oauth_login 用同一套 API 取 OAuth 验证码
             const inboxBundle = {
                 emailSource: regResult.emailSource || '',
@@ -886,14 +1032,17 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                 inboxApiBase: regResult.inboxApiBase || ''
             };
 
+            let reusableCheckoutUrl = '';
             let activationAttempt = 0;
 
             while (activationAttempt < CONFIG.MAX_ACT_RETRIES_PER_ACCOUNT) {
+                ensureNotStopped();
                 activationAttempt += 1;
                 // 排队等待真正可用的资产（10s 一轮），最多等 5 分钟
                 let runtimeAssets = null;
                 const reserveDeadline = Date.now() + 5 * 60 * 1000;
                 while (Date.now() < reserveDeadline) {
+                    ensureNotStopped();
                     runtimeAssets = await store.reserveRuntimeAssets(`${ownerKey}:${email}:${activationAttempt}`);
                     if (runtimeAssets.phone.phone && runtimeAssets.phone.phone !== '未配置' && runtimeAssets.card.number) {
                         break;
@@ -934,6 +1083,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                 let activationResult;
                 let analysis;
                 try {
+                ensureNotStopped();
                 let activationProgress = 34;
                 let activationMessage = `正在激活账号，手机号 ${runtimeAssets.phone.phone}，银行卡尾号 ${cardLast4}...`;
                 activationResult = await runActivationChild(
@@ -949,6 +1099,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                         CARD_NUMBER: runtimeAssets?.card?.number || '',
                         CARD_EXPIRY: runtimeAssets?.card?.expiry || '',
                         CARD_CVC: runtimeAssets?.card?.cvc || '',
+                        REUSE_CHECKOUT_URL: reusableCheckoutUrl,
                         IS_PRODUCT_FLOW: 'true'
                     },
                     (line) => {
@@ -965,7 +1116,15 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                             });
                         }
                     },
-                    { runtimeJobKey }
+                    {
+                        runtimeJobKey,
+                        stopCheck,
+                        onMessage: (msg) => {
+                            if (msg?.type === 'checkout_url' && msg.url) {
+                                reusableCheckoutUrl = String(msg.url || '').trim();
+                            }
+                        }
+                    }
                 );
                 analysis = activationResult.analysis;
                 } finally {
@@ -986,6 +1145,12 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                     } catch (insertErr) {
                         console.warn(`[Product] 占位入库失败（不阻塞流程）: ${insertErr.message}`);
                     }
+                    if (String(inboxBundle.emailSource || '').toLowerCase() === 'pool') {
+                        await store.markPoolEmailPlusRegisteredByEmail(email).catch((err) => {
+                            console.warn(`[Product] 标记邮箱 Plus 完成失败: ${err.message}`);
+                        });
+                        poolReservationHeld = false;
+                    }
 
                     progressCallback({
                         progress: 85,
@@ -998,6 +1163,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                     console.log('[Product] Finalizing: Extracting OAuth tokens...');
                     let oauthResult;
                     try {
+                        ensureNotStopped();
                         oauthResult = await runProtocolProcess(email, (payload) => {
                             progressCallback({
                                 ...payload,
@@ -1005,7 +1171,8 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                                 cardLast4,
                                 cardExpiry
                             });
-                        }, runtimeJobKey, inboxBundle);
+                        }, runtimeJobKey, inboxBundle, stopCheck);
+                        ensureNotStopped();
                     } catch (e) {
                         const msg = e.message || String(e);
                         console.error(
@@ -1022,18 +1189,22 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                         throw new Error(`支付已成功并占位入库，但协议提取失败(status=待协议): ${msg}`);
                     }
 
+                    const shouldBindImapKey = String(inboxBundle.emailSource || '').toLowerCase() === 'random';
+
                     progressCallback({
                         progress: 99,
-                        message: '协议提取成功，正在绑定邮箱 Key...',
+                        message: shouldBindImapKey
+                            ? '协议提取成功，正在绑定邮箱 Key...'
+                            : '协议提取成功，正在写入成品库...',
                         phone: runtimeAssets.phone.phone,
                         cardLast4,
                         cardExpiry
                     });
 
-                    const imapKey = await generateImapKey(email);
+                    const imapKey = shouldBindImapKey ? await generateImapKey(email) : '';
                     // 协议成功 → 升级 status='正常'，补 file_path 和 imap_key
                     const finalFilePath = oauthResult.sub2apiPath || oauthResult.sub2apiFile || oauthResult.filePath || '';
-                    await store.markProductReadyByEmail(email, finalFilePath, imapKey);
+                    await store.markProductReadyByEmail(email, finalFilePath, imapKey || null);
 
                     await store.incrementAssetSuccessCount({
                         phone: runtimeAssets.phone.phone,
@@ -1070,6 +1241,19 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                     };
                 }
 
+                if (analysis.message.includes('无激活权限')) {
+                    console.warn(`[Product] Account ${email}: No activation permission. Switching to new account...`);
+                    if (poolEmailId) {
+                        skippedPoolEmailIds.add(poolEmailId);
+                    }
+                    await releaseCurrentPoolEmail();
+                    progressCallback({
+                        progress: Math.min(20 + accountAttempt * 5, 55),
+                        message: '该账号无激活权限，准备更换下一个账号...'
+                    });
+                    break;
+                }
+
                 topupFailureCount += 1;
                 console.warn(
                     `[Product] Account ${email}: 上号失败累计 ${topupFailureCount}/${CONFIG.MAX_TOPUP_FAILURES_BEFORE_STOP}`
@@ -1081,15 +1265,6 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
 
                 if (analysis.status === 'maintenance' || analysis.message.includes('系统维护中')) {
                     throw new Error('系统维护中,请联系管理员修复');
-                }
-
-                if (analysis.message.includes('无激活权限')) {
-                    console.warn(`[Product] Account ${email}: No activation permission. Switching to new account...`);
-                    progressCallback({
-                        progress: Math.min(20 + accountAttempt * 5, 55),
-                        message: '该账号无激活权限，准备更换下一个账号...'
-                    });
-                    break;
                 }
 
                 if (analysis.shouldRetry || analysis.status === 'retry') {
@@ -1142,6 +1317,10 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
             const isPaidButOauthFailed = error.message.includes('支付已成功并占位入库')
                 || error.message.includes('协议提取失败');
 
+            if (error.message.includes('邮箱池') && error.message.includes('资产池枯竭')) {
+                throw error;
+            }
+
             if (isPaidButOauthFailed) {
                 console.error(`[Product] ⛔ 支付已成功但协议提取失败（${error.message}）→ 终止任务，避免重复扣费。pending 记录已写入 DB，可后台手动补 RT。`);
                 throw new Error(`支付已成功但协议提取失败，已占位入库（status=待协议），请到后台查看并补 RT。原因: ${error.message}`);
@@ -1165,6 +1344,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                 break;
             }
 
+            await releaseCurrentPoolEmail();
             await sleep(CONFIG.RETRY_DELAY_MS);
         }
     }
@@ -1172,9 +1352,27 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
     throw new Error('该账号无激活权限,请更换账号重试');
 }
 
+async function createFreePoolAccount(progressCallback = () => { }, options = {}) {
+    const runtimeJobKey = String(options.jobKey || '');
+    const stopCheck = typeof options.stopCheck === 'function' ? options.stopCheck : null;
+    const result = await runRegistrationProcess((payload) => {
+        progressCallback(payload);
+    }, runtimeJobKey, stopCheck, {
+        forceEmailSource: 'pool',
+        includeRegisteredFree: false,
+        keepPoolReservation: false
+    });
+
+    return {
+        success: true,
+        email: result.email,
+        poolEmailId: result.poolEmailId || 0
+    };
+}
+
 if (require.main === module) {
     const cdk = process.argv[2];
     startProductCreation(cdk, console.log).catch(console.error);
 }
 
-module.exports = { startProductCreation };
+module.exports = { startProductCreation, createFreePoolAccount };

@@ -9,7 +9,7 @@ const axios = require('axios');
 const store = require('./mysql-store');
 const { listRecentEmailsForAdmin } = require('./pool-email-imap');
 const runtimeLog = require('./runtime-log');
-const { initializeImapAuth, getImapAuthHeaders } = require('./imap-auth');
+const { getImapAuthHeaders } = require('./imap-auth');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -77,6 +77,17 @@ let systemMetricsCache = {
 let accessDeactivatedSyncPromise = null;
 let accessDeactivatedLastSyncAt = 0;
 let accessDeactivatedSyncTimer = null;
+
+async function isRandomEmailSourceEnabled() {
+    if (!String(process.env.IMAP_ADMIN_PASSWORD || '').trim()) {
+        return false;
+    }
+    const source = String(await store.getAppConfigValue('email_source', '')).toLowerCase();
+    if (['random', 'pool', 'inbox'].includes(source)) {
+        return source === 'random';
+    }
+    return String(await store.getAppConfigValue('pool_email_enabled', '0')) !== '1';
+}
 
 function reserveForegroundSlot(slotKey) {
     activeForegroundJobs.add(String(slotKey));
@@ -191,6 +202,10 @@ function collectMessageEmails(message) {
 }
 
 async function syncAccessDeactivatedProductStatuses(force = false) {
+    if (!(await isRandomEmailSourceEnabled())) {
+        return { skipped: true, reason: 'email_source_not_random' };
+    }
+
     const now = Date.now();
     if (!force && accessDeactivatedSyncPromise) {
         return accessDeactivatedSyncPromise;
@@ -318,9 +333,12 @@ function scheduleAccessDeactivatedSync(delayMs = ACCESS_DEACTIVATED_SYNC_COOLDOW
     }, Math.max(1000, Number(delayMs) || ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS));
 }
 
-async function waitForAvailableActivationSlot(jobSet, maxConcurrentActivations, excludedSlotKeys = []) {
+async function waitForAvailableActivationSlot(jobSet, maxConcurrentActivations, excludedSlotKeys = [], stopCheck = null) {
     const excluded = new Set((excludedSlotKeys || []).map((item) => String(item)));
     while (true) {
+        if (typeof stopCheck === 'function' && stopCheck()) {
+            return false;
+        }
         let occupied = 0;
         for (const slot of jobSet) {
             if (!excluded.has(String(slot))) {
@@ -328,7 +346,7 @@ async function waitForAvailableActivationSlot(jobSet, maxConcurrentActivations, 
             }
         }
         if (occupied < Math.max(1, Number(maxConcurrentActivations) || 1)) {
-            return;
+            return true;
         }
         await sleep(1000);
     }
@@ -631,7 +649,15 @@ async function startAdminProductGenerationTask(count, options = {}) {
                                 : `正在生产第 ${currentIndex}/${targetCount} 个成品号...`
                         );
 
-                        await waitForAvailableActivationSlot(activeBackgroundJobs, maxConcurrentActivations);
+                        const hasSlot = await waitForAvailableActivationSlot(
+                            activeBackgroundJobs,
+                            maxConcurrentActivations,
+                            [],
+                            () => aborted
+                        );
+                        if (!hasSlot || aborted) {
+                            return;
+                        }
                         reserveBackgroundSlot(slotKey);
 
                         try {
@@ -640,7 +666,10 @@ async function startAdminProductGenerationTask(count, options = {}) {
                                 itemProgress.set(currentIndex, Math.max(0, Math.min(99, Number(progressData.progress) || 0)));
                                 const itemMessage = progressData.message || `正在生产第 ${currentIndex}/${targetCount} 个成品号...`;
                                 await publishBatchProgress(`第 ${currentIndex}/${targetCount} 个: ${itemMessage}`);
-                            }, { jobKey: task.jobKey });
+                            }, {
+                                jobKey: task.jobKey,
+                                stopCheck: () => aborted
+                            });
 
                             if (result?.success) {
                                 await store.addProduct(result.email, result.sub2apiPath || result.sub2apiFile || '', null, null, result.imapKey || null);
@@ -652,6 +681,10 @@ async function startAdminProductGenerationTask(count, options = {}) {
                             }
                         } catch (error) {
                             lastError = error.message || '未知错误';
+                            if (aborted) {
+                                logTask(task.jobKey, `第 ${currentIndex}/${targetCount} 个已收到停止指令，停止当前条次: ${lastError}`, 'warn');
+                                return;
+                            }
                             if (isFatalProductGenerationError(error)) {
                                 failedCount += 1;
                                 aborted = true;
@@ -726,6 +759,73 @@ async function startAdminProductGenerationTask(count, options = {}) {
     })();
 
     return { task, workerCount, targetCount };
+}
+
+async function startAdminFreeAccountGenerationTask(count) {
+    const targetCount = Math.max(1, Math.min(Number(count) || 1, 100));
+    const task = await store.createTaskLog({
+        tokenPreview: 'ADMIN_FREE_ACCOUNT_GEN',
+        cdkCode: `ADMIN_FREE_ACCOUNT_GEN:${targetCount}`,
+        status: 'running',
+        progress: 1
+    });
+
+    let completed = 0;
+    let successCount = 0;
+    let failedCount = 0;
+    let lastError = '';
+
+    const buildSummary = () => JSON.stringify({
+        kind: 'admin_free_account_generation',
+        targetCount,
+        completedCount: completed,
+        successCount,
+        failedCount,
+        lastError
+    });
+
+    const publish = async (message, progress, status = 'running') => {
+        await store.updateTaskLog(task.jobKey, {
+            status,
+            message,
+            rawOutput: buildSummary(),
+            cdkCode: `ADMIN_FREE_ACCOUNT_GEN:${targetCount}`,
+            progress
+        });
+        broadcastToTask(task.jobKey, {
+            type: status === 'running' ? 'progress' : 'status',
+            jobKey: task.jobKey,
+            progress,
+            status,
+            message
+        });
+    };
+
+    logTask(task.jobKey, `🎬 免费号生成启动  count=${targetCount}`);
+
+    (async () => {
+        try {
+            for (let i = 1; i <= targetCount; i += 1) {
+                await publish(`正在生成第 ${i}/${targetCount} 个免费号...`, Math.max(1, Math.floor(((i - 1) * 100) / targetCount)));
+                const result = await createFreePoolAccount(async (progressData) => {
+                    const itemProgress = Math.max(0, Math.min(99, Number(progressData.progress) || 0));
+                    const progress = Math.max(1, Math.min(99, Math.floor((((i - 1) * 100) + itemProgress) / targetCount)));
+                    await publish(`第 ${i}/${targetCount} 个: ${progressData.message || '免费号生成中...'}`, progress);
+                }, { jobKey: task.jobKey });
+                successCount += 1;
+                completed += 1;
+                logTask(task.jobKey, `第 ${i}/${targetCount} 个免费号生成成功 email=${result.email}`);
+            }
+            await publish(`成功生成 ${successCount} 个免费号`, 100, 'success');
+        } catch (error) {
+            lastError = error.message || '未知错误';
+            failedCount += 1;
+            await publish(`免费号生成失败：${lastError}`, 100, 'failed');
+            logTask(task.jobKey, `免费号生成失败: ${lastError}`, 'error');
+        }
+    })();
+
+    return { task, targetCount };
 }
 
 function broadcastToTask(jobKey, data) {
@@ -1061,10 +1161,24 @@ function analyzeProcessOutput(output, timedOut) {
         };
     }
 
+    if (normalized.includes('订单创建失败 (Status: 502)')
+        || normalized.includes('代理连接被对端断开')
+        || normalized.includes('default_proxy_used')
+        || normalized.includes('无法获取 PayPal 审批链接')) {
+        return {
+            status: 'retry',
+            message: '支付链接生成/打开失败，准备同账号重试',
+            reachedPaypal: false,
+            shouldRetry: true,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
     if (normalized.includes('金额校验失败')
         || normalized.includes('Missing PayPal approval URL / ba_token')
         || normalized.includes('多次尝试后仍未获取到 PayPal 重定向 URL')
-        || normalized.includes('无法获取 PayPal 审批链接')) {
+        ) {
         return {
             status: 'failed',
             message: '该账号无激活权限,请更换账号重试',
@@ -1648,6 +1762,36 @@ app.get('/api/admin/pool-emails/:id/messages', authenticateAdmin, async (req, re
     }
 });
 
+app.get('/api/admin/free-accounts', authenticateAdmin, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const items = await store.listFreePoolAccounts();
+        res.json({ success: true, items });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/free-accounts/generate', authenticateAdmin, async (req, res) => {
+    const count = Math.max(1, Math.min(Number(req.body?.count) || 1, 100));
+    try {
+        await ensureStoreReady();
+        const maintenanceModeState = await store.getMaintenanceModeState();
+        if (maintenanceModeState.enabled) {
+            return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
+        }
+        const launched = await startAdminFreeAccountGenerationTask(count);
+        res.json({
+            success: true,
+            jobKey: launched.task.jobKey,
+            workerCount: 1,
+            message: `免费号生成任务已启动，共 ${count} 个`
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 app.use('/api/admin', authenticateAdmin);
 
 app.get('/api/public/runtime', async (req, res) => {
@@ -2067,7 +2211,7 @@ app.get('/api/admin/products/:id/export', async (req, res) => {
     }
 });
 
-const { startProductCreation } = require('./product_activator');
+const { startProductCreation, createFreePoolAccount } = require('./product_activator');
 
 app.post('/api/admin/products/generate', async (req, res) => {
     const count = Math.max(1, Math.min(Number(req.body?.count) || 1, 100));
@@ -2812,15 +2956,6 @@ async function start() {
             console.warn(`⚠️  [资产锁] 周期清理失败: ${error.message}`);
         }
     }, 60 * 1000).unref();
-
-    try {
-        await initializeImapAuth();
-        await syncAccessDeactivatedProductStatuses(true);
-        scheduleAccessDeactivatedSync();
-    } catch (error) {
-        console.error(`[IMAP] 项目启动预刷新失败: ${error.message}`);
-        scheduleAccessDeactivatedSync();
-    }
 
     const server = app.listen(PORT, () => {
         const conn = store.connectionInfo;

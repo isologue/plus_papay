@@ -6,7 +6,6 @@ const IMAP_PASSWORD = process.env.IMAP_ADMIN_PASSWORD || '';
 const IMAP_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 let cachedToken = '';
-let tokenIssuedAt = 0;
 let refreshPromise = null;
 let refreshTimer = null;
 let started = false;
@@ -21,7 +20,7 @@ function scheduleRefresh() {
         try {
             await refreshImapToken(true);
         } catch (error) {
-            console.error(`❌ [IMAP] 定时刷新失败: ${error.message}`);
+            console.error(`[IMAP] token refresh failed: ${error.message}`);
             scheduleRefresh();
         }
     }, IMAP_REFRESH_INTERVAL_MS);
@@ -51,12 +50,10 @@ async function refreshImapToken(force = false) {
 
         const token = String(response?.data?.token || '').trim();
         if (!token) {
-            throw new Error('IMAP 登录失败：接口未返回 token');
+            throw new Error('IMAP login failed: token missing');
         }
 
         cachedToken = token;
-        tokenIssuedAt = Date.now();
-        // (静默) IMAP Token 已刷新
         scheduleRefresh();
         return cachedToken;
     })();
@@ -93,10 +90,6 @@ async function initializeImapAuth() {
     started = true;
     return forceRefreshImapToken();
 }
-
-initializeImapAuth().catch((error) => {
-    console.error(`❌ [IMAP] 启动预刷新失败: ${error.message}`);
-});
 
 module.exports = {
     initializeImapAuth,

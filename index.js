@@ -520,8 +520,22 @@ async function run() {
 
         // --- Phase 1: API Initialization ---
         const gpt = new ChatGPTService(context.request, CONFIG.chatgptToken, CONFIG.stripeKey);
-        // (静默) 创建订单（成功/失败由 chatgpt.js 内打印）
-        const paypalUrl = await gpt.getPayPalApprovalUrl(CONFIG.billing);
+        const createCheckoutUrl = async () => {
+            // (静默) 创建订单（成功/失败由 chatgpt.js 内打印）
+            const url = await gpt.getPayPalApprovalUrl(CONFIG.billing);
+            if (url && process.send) {
+                process.send({ type: 'checkout_url', url });
+            }
+            return url;
+        };
+
+        let paypalUrl = String(process.env.REUSE_CHECKOUT_URL || '').trim();
+        let usingReusedCheckoutUrl = Boolean(paypalUrl);
+        if (usingReusedCheckoutUrl) {
+            console.log("♻️ [步骤] 复用上次生成的 Stripe Hosted Checkout 页面...");
+        } else {
+            paypalUrl = await createCheckoutUrl();
+        }
 
         if (!paypalUrl) {
             throw new Error("无法获取 PayPal 审批链接");
@@ -1045,9 +1059,28 @@ async function run() {
         }
 
         // --- Phase 3: Checkout Execution ---
-        console.log("💳 [步骤] 打开 Stripe Hosted Checkout 页面...");
-        await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-        await recoverConnectionClosed(page, paypalUrl);
+        const openCheckoutPage = async () => {
+            console.log("💳 [步骤] 打开 Stripe Hosted Checkout 页面...");
+            try {
+                await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+                await recoverConnectionClosed(page, paypalUrl);
+                return true;
+            } catch (error) {
+                if (!usingReusedCheckoutUrl) {
+                    throw error;
+                }
+                console.warn(`⚠️ [步骤] 复用支付链接打开失败，重新生成支付链接: ${error.message}`);
+                paypalUrl = await createCheckoutUrl();
+                usingReusedCheckoutUrl = false;
+                if (!paypalUrl) {
+                    throw new Error("无法获取 PayPal 审批链接");
+                }
+                await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+                await recoverConnectionClosed(page, paypalUrl);
+                return true;
+            }
+        };
+        await openCheckoutPage();
 
         const normalizeAmount = (raw) => {
             return String(raw || '')
@@ -1085,6 +1118,29 @@ async function run() {
                 if (hasZeroAmount) break;
             }
             await page.waitForTimeout(amountPollIntervalMs);
+        }
+
+        if (usingReusedCheckoutUrl && latestAmountTexts.length === 0) {
+            console.warn("⚠️ [步骤] 复用支付链接未进入有效 Checkout 页面，重新生成支付链接...");
+            paypalUrl = await createCheckoutUrl();
+            usingReusedCheckoutUrl = false;
+            if (!paypalUrl) {
+                throw new Error("无法获取 PayPal 审批链接");
+            }
+            await page.goto(paypalUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+            await recoverConnectionClosed(page, paypalUrl);
+
+            latestAmountTexts = [];
+            hasZeroAmount = false;
+            const retryDeadline = Date.now() + amountWaitTimeoutMs;
+            while (Date.now() < retryDeadline) {
+                latestAmountTexts = await collectAmountTexts();
+                if (latestAmountTexts.length > 0) {
+                    hasZeroAmount = latestAmountTexts.some(isZeroAmountText);
+                    if (hasZeroAmount) break;
+                }
+                await page.waitForTimeout(amountPollIntervalMs);
+            }
         }
         console.log(`💰 [步骤] 当前页面金额元素: ${latestAmountTexts.join(' | ') || '(空)'}`);
         if (!hasZeroAmount) {
@@ -1257,15 +1313,35 @@ async function run() {
             }
             console.log("📝 [步骤] 正在填写 Stripe 邮编与城市...");
 
+            const isFillableStripeField = async (loc) => {
+                if (!(await loc.isVisible({ timeout: 1000 }).catch(() => false))) {
+                    return false;
+                }
+                return loc.evaluate((node) => {
+                    const className = String(node.className || '');
+                    const ariaHidden = String(node.getAttribute('aria-hidden') || '').toLowerCase() === 'true';
+                    const tabIndex = Number(node.getAttribute('tabindex'));
+                    const style = window.getComputedStyle(node);
+                    const rect = node.getBoundingClientRect();
+                    return !ariaHidden
+                        && !className.includes('HiddenInput')
+                        && !(Number.isFinite(tabIndex) && tabIndex < 0)
+                        && style.visibility !== 'hidden'
+                        && style.display !== 'none'
+                        && rect.width > 4
+                        && rect.height > 4;
+                }).catch(() => false);
+            };
+
             // 这两个字段在 Stripe 部分账户类型下不存在；做一次 isVisible 预检（最多等 6s）
             // 避免直接进入 humanFillInput 触发 50s 超时浪费时间
             const zipLoc = page.locator('#billingPostalCode').first();
             const cityLoc = page.locator('#billingLocality').first();
-            const zipVisible = await zipLoc.isVisible({ timeout: 6000 }).catch(() => false);
-            const cityVisible = await cityLoc.isVisible({ timeout: 1000 }).catch(() => false);
+            const zipVisible = await isFillableStripeField(zipLoc);
+            const cityVisible = await isFillableStripeField(cityLoc);
 
             if (!zipVisible && !cityVisible) {
-                console.log("⏩ [步骤] 当前 Stripe 表单无 #billingPostalCode / #billingLocality 字段，跳过。");
+                console.log("⏩ [步骤] 当前 Stripe 邮编/城市字段不可直接填写（隐藏或不存在），跳过。");
                 return;
             }
 
