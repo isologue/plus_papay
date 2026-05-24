@@ -3992,8 +3992,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             document.getElementById('cdk_body').innerHTML = pageData.items.map((cdk) => {
                 const code = typeof cdk === 'string' ? cdk : (cdk.code || '');
                 const status = typeof cdk === 'string' ? 'unused' : (cdk.status || 'unused');
-                const shipped = typeof cdk === 'string' ? false : Boolean(cdk.shipped);
                 const type = typeof cdk === 'string' ? '自助' : (cdk.type || '自助');
+                const shipped = typeof cdk === 'string' ? false : Boolean(cdk.shipped);
                 const usedAt = typeof cdk === 'string' ? null : cdk.used_at;
                 const createdAt = typeof cdk === 'string' ? null : cdk.created_at;
 
@@ -4171,7 +4171,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             }
             lucide.createIcons();
         }
-
         let currentGenerateType = '自助';
         function selectGenerateType(type) {
             currentGenerateType = type;

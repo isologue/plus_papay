@@ -1,6 +1,7 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const iconv = require('iconv-lite');
 const mysql = require('mysql2/promise');
 
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
@@ -13,6 +14,49 @@ const SCHEMA_PATH = path.join(__dirname, 'mysql-schema.sql');
 const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'admin');
 
 let pool = null;
+const TASK_MOJIBAKE_RE = /[馃鈥€鍒鍚鍩瀵鎻绛鎴鎵璺褰鎷婊闈欓銆锛]/;
+const TASK_TEXT_ALIASES = new Map([
+    ['姝ｅ湪寮€閫氫腑', '正在开通中'],
+    ['鎴愬搧鐢熶骇', '成品'],
+    ['鑷姪', '自助'],
+    ['绯荤粺鐢熸垚', '系统生成'],
+    ['灏佺', '封禁'],
+    ['绯荤粺閿欒涓柇', '系统错误中断'],
+]);
+
+function applyTaskTextAliases(text) {
+    let next = String(text || '');
+    for (const [bad, good] of TASK_TEXT_ALIASES.entries()) {
+        next = next.split(bad).join(good);
+    }
+    return next;
+}
+
+function repairTaskText(value) {
+    if (value === null || value === undefined) {
+        return value;
+    }
+
+    const original = String(value);
+    let next = applyTaskTextAliases(original);
+    if (!TASK_MOJIBAKE_RE.test(next)) {
+        return next;
+    }
+
+    try {
+        const repaired = iconv.decode(iconv.encode(next, 'gb18030'), 'utf8');
+        const aliased = applyTaskTextAliases(repaired);
+        const originalHits = (next.match(TASK_MOJIBAKE_RE) || []).length;
+        const repairedHits = (aliased.match(TASK_MOJIBAKE_RE) || []).length;
+        if (aliased && repairedHits < originalHits) {
+            next = aliased;
+        }
+    } catch (_) {
+        // ignore recovery failure and keep original text
+    }
+
+    return next;
+}
 
 function getPool() {
     if (!pool) {
@@ -490,7 +534,7 @@ async function getAdminData() {
             product_resume_available: Boolean(resumableTask),
             product_resume_count: Number(resumableTask?.remainingCount || 0),
             product_resume_message: resumableTask
-                ? `绯荤粺閿欒涓柇锛屽墿浣?${resumableTask.remainingCount} 涓緟缁х画鐢熶骇`
+                ? repairTaskText(`绯荤粺閿欒涓柇锛屽墿浣?${resumableTask.remainingCount} 涓緟缁х画鐢熶骇`)
                 : '',
             product_resume_job_key: resumableTask?.jobKey || ''
         },
@@ -499,11 +543,11 @@ async function getAdminData() {
             return {
                 id: row.job_key,
                 time: row.display_time,
-                token: isAdminProductGeneration ? '绯荤粺鐢熸垚' : row.token_preview,
-                cdk: isAdminProductGeneration ? '绯荤粺鐢熸垚' : (row.cdk_code || ''),
-                type: isAdminProductGeneration ? '鎴愬搧鐢熶骇' : (row.cdk_type || '鑷姪'),
+                token: repairTaskText(isAdminProductGeneration ? '绯荤粺鐢熸垚' : row.token_preview),
+                cdk: repairTaskText(isAdminProductGeneration ? '绯荤粺鐢熸垚' : (row.cdk_code || '')),
+                type: repairTaskText(isAdminProductGeneration ? '鎴愬搧鐢熶骇' : (row.cdk_type || '鑷姪')),
                 phone: row.phone,
-                message: row.message || '',
+                message: repairTaskText(row.message || ''),
                 cardLast4: row.card_last4 || '',
                 status: row.status,
                 progress: Number(row.progress || 0)
@@ -1494,7 +1538,7 @@ async function createTaskLog({ tokenPreview, cdkCode, phone, cardLast4, status, 
     const now = new Date();
     const displayTime = now.toLocaleString('zh-CN', { hour12: false });
     const jobKey = `${now.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
-    const message = String(status) === 'running' ? '姝ｅ湪寮€閫氫腑' : null;
+    const message = String(status) === 'running' ? '正在开通中' : null;
 
     await runExecute(
         `INSERT INTO task_logs (job_key, token_preview, cdk_code, phone, card_last4, status, message, progress, display_time, raw_output)
@@ -1523,7 +1567,14 @@ async function getTaskStatus(jobKey) {
          LIMIT 1`,
         [String(jobKey)]
     );
-    return rows[0] || null;
+    if (!rows[0]) {
+        return null;
+    }
+    return {
+        ...rows[0],
+        message: repairTaskText(rows[0].message || ''),
+        cdk_code: repairTaskText(rows[0].cdk_code || '')
+    };
 }
 
 async function getRunningTaskByCdk(cdk) {
