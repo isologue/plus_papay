@@ -4,7 +4,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { getImapAuthHeaders } = require('./imap-auth');
-const { fetchLatestOpenAiOtpOnce } = require('./pool-email-imap');
+const { fetchLatestOpenAiOtpOnce, isMicrosoftServiceAbuseError } = require('./pool-email-imap');
 const inboxEmail = require('./inbox-email');
 
 // 使用 stealth 插件
@@ -83,6 +83,11 @@ function getRandomEmailDomain() {
         .replace(/^@/, '')
         .toLowerCase()
         || 'chiyiyi.cloud';
+}
+
+function normalizeChromiumChannel(value) {
+    const raw = String(value || '').split('#')[0].trim().toLowerCase();
+    return ['chrome', 'msedge'].includes(raw) ? raw : '';
 }
 
 function escapeRegex(str) {
@@ -276,6 +281,10 @@ async function getLatestCodeMicrosoftImap(email, credentials = {}, opts = {}) {
 
             console.log('📨 [MS-IMAP] 暂未读取到符合条件的新验证码，继续轮询...');
         } catch (err) {
+            if (isMicrosoftServiceAbuseError(err)) {
+                console.error(`📨 [MS-IMAP] 邮箱 OAuth 已被微软判定为服务滥用，停止轮询: ${err.message}`);
+                throw err;
+            }
             console.error(`📨 [MS-IMAP] 本次轮询失败: ${err.message}`);
         }
 
@@ -1130,7 +1139,7 @@ async function runRegistrationFlow() {
 
     const DEBUG_HEADFUL = process.env.HEADFUL === '1';
     const DEBUG_PAUSE_ON_ERROR_MS = Number(process.env.DEBUG_PAUSE_ON_ERROR_MS || (DEBUG_HEADFUL ? 30000 : 0));
-    const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
+    const CHROMIUM_CHANNEL = normalizeChromiumChannel(process.env.CHROMIUM_CHANNEL);
 
     let browser;
     let page = null;
@@ -1967,7 +1976,7 @@ if (require.main === module) {
                 process.send({ type: 'error', message: msg });
             }
             // 已知错误（域名/超时/鉴权/代理）只打一行；未知错误才打完整堆栈
-            const isKnown = /Inbox 临时邮箱创建失败|获取验证码超时|OpenAI 鉴权服务异常|代理不可用|代理或网络持续超时|user_already_exists|该邮箱已被注册|个人资料表单校验失败|注册后未能成功进入主站页面|page\.goto/i.test(msg);
+            const isKnown = /Inbox 临时邮箱创建失败|获取验证码超时|OpenAI 鉴权服务异常|代理不可用|代理或网络持续超时|user_already_exists|该邮箱已被注册|个人资料表单校验失败|注册后未能成功进入主站页面|service abuse mode|AADSTS70000|page\.goto/i.test(msg);
             if (isKnown) {
                 console.error(`❌ [注册] ${msg}`);
             } else {

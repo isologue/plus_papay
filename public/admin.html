@@ -2171,11 +2171,23 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             </div>
             <div class="panel">
                 <h2 class="panel-title">邮箱列表</h2>
+                <div class="batch-actions" style="margin-top:16px;">
+                    <button class="btn btn-success" onclick="togglePageSelection('pool_email')">
+                        <i data-lucide="check-square"></i>
+                        全选 / 取消
+                    </button>
+                    <button class="btn btn-success" onclick="batchDeletePoolEmails()" style="background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">
+                        <i data-lucide="trash-2"></i>
+                        批量删除
+                    </button>
+                </div>
                 <div class="table-wrapper" style="margin-top: 20px;">
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th width="56px" style="text-align:center"></th>
                                 <th style="min-width:220px;">邮箱</th>
+                                <th width="120px" style="text-align:center">状态</th>
                                 <th width="120px" style="text-align:center">认证方式</th>
                                 <th width="130px" style="text-align:center">注册状态</th>
                                 <th width="130px" style="text-align:center">Plus</th>
@@ -2248,10 +2260,21 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             </div>
             <div class="panel">
                 <h2 class="panel-title">免费号列表</h2>
+                <div class="batch-actions" style="margin-top:16px;">
+                    <button class="btn btn-success" onclick="togglePageSelection('free_account')">
+                        <i data-lucide="check-square"></i>
+                        全选 / 取消
+                    </button>
+                    <button class="btn btn-success" onclick="batchDownloadFreeAccountCpa()">
+                        <i data-lucide="download"></i>
+                        批量下载 CPA
+                    </button>
+                </div>
                 <div class="table-wrapper" style="margin-top:20px;">
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th width="56px" style="text-align:center"></th>
                                 <th style="min-width:220px;">邮箱</th>
                                 <th width="130px" style="text-align:center">Token</th>
                                 <th width="130px" style="text-align:center">占用</th>
@@ -2539,7 +2562,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             phone_pool: new Set(),
             card_pool: new Set(),
             cdk: new Set(),
-            product: new Set()
+            product: new Set(),
+            pool_email: new Set(),
+            free_account: new Set()
         };
         const tableFilters = {
             phone_pool: 'all',
@@ -2565,6 +2590,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             card_pool: { page: 1, pageSize: 10 },
             cdk: { page: 1, pageSize: 12 },
             product: { page: 1, pageSize: 12 },
+            pool_email: { page: 1, pageSize: 9999 },
+            free_account: { page: 1, pageSize: 9999 },
             log: { page: 1, pageSize: 12 }
         };
 
@@ -3001,7 +3028,12 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
 
         function getFilteredItems(type) {
             const filter = tableFilters[type] || 'all';
-            const source = type === 'phone_pool' ? phonePool : type === 'card_pool' ? cardPool : type === 'cdk' ? cdkPool : productPool;
+            const source = type === 'phone_pool' ? phonePool
+                : type === 'card_pool' ? cardPool
+                    : type === 'cdk' ? cdkPool
+                        : type === 'pool_email' ? poolEmailsList
+                            : type === 'free_account' ? freeAccountsList
+                                : productPool;
             let result = source;
             if (type === 'phone_pool' || type === 'card_pool') {
                 result = filter === 'all'
@@ -3065,6 +3097,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             if (type === 'card_pool') renderCardTable();
             if (type === 'cdk') renderCDKTable();
             if (type === 'product') renderProductTable();
+            if (type === 'pool_email') renderPoolEmailsTable();
+            if (type === 'free_account') renderFreeAccountsTable();
         }
 
         function handleProductSearch(value) {
@@ -3121,6 +3155,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             if (type === 'card_pool') return item.number || '';
             if (type === 'cdk') return typeof item === 'string' ? item : (item.code || '');
             if (type === 'product') return String(item.id || '');
+            if (type === 'pool_email') return String(item.id || '');
+            if (type === 'free_account') return String(item.id || '');
             return '';
         }
 
@@ -3148,6 +3184,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             if (type === 'card_pool') renderCardTable();
             if (type === 'cdk') renderCDKTable();
             if (type === 'product') renderProductTable();
+            if (type === 'pool_email') renderPoolEmailsTable();
+            if (type === 'free_account') renderFreeAccountsTable();
         }
 
         function pruneSelection(type, source) {
@@ -3261,6 +3299,11 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
 
             tbody.innerHTML = poolEmailsList.map((row) => {
                 const id = Number(row.id);
+                const key = String(id);
+                const isUnavailable = String(row.status || '正常') === '不可用';
+                const statusBadge = isUnavailable
+                    ? '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">不可用</span>'
+                    : '<span class="status-badge status-success">正常</span>';
                 const regBadge = row.registered
                     ? '<span class="status-badge status-success">已注册</span>'
                     : '<span class="status-badge status-running">未注册</span>';
@@ -3287,7 +3330,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 const safeEmail = escapeHtml(row.email || '');
                 return `
                 <tr>
+                    <td class="select-cell"><input type="checkbox" ${selectedItems.pool_email.has(key) ? 'checked' : ''} onchange="toggleSelection('pool_email', '${key}', this.checked)"></td>
                     <td><code>${safeEmail}</code></td>
+                    <td style="text-align:center">${statusBadge}</td>
                     <td style="text-align:center">${pwdCell}</td>
                     <td style="text-align:center">${regBadge}</td>
                     <td style="text-align:center">${plusBadge}</td>
@@ -3315,6 +3360,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     throw new Error(data.message || '加载邮箱列表失败');
                 }
                 poolEmailsList = Array.isArray(data.items) ? data.items : [];
+                pruneSelection('pool_email', poolEmailsList);
                 renderPoolEmailsTable();
                 if (showToast) {
                     showMessage('邮箱列表已刷新', 'success');
@@ -3429,6 +3475,34 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             }
         }
 
+        async function batchDeletePoolEmails() {
+            const ids = Array.from(selectedItems.pool_email).map((id) => Number(id)).filter(Boolean);
+            if (ids.length === 0) {
+                showMessage('请选择要删除的邮箱', 'warning');
+                return;
+            }
+            const ok = await showAdminConfirm(`确定删除选中的 ${ids.length} 条邮箱记录？此操作不可恢复。`, '批量删除邮箱');
+            if (!ok) {
+                return;
+            }
+            try {
+                const res = await authFetch('/api/admin/pool-emails/bulk-delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                const data = await res.json();
+                if (!res.ok || data.success === false) {
+                    throw new Error(data.message || '批量删除失败');
+                }
+                selectedItems.pool_email.clear();
+                showMessage(data.message || `已删除 ${ids.length} 条邮箱记录`, 'success');
+                await loadPoolEmails(false);
+            } catch (error) {
+                showMessage(error.message || '批量删除失败', 'error');
+            }
+        }
+
         function renderFreeAccountsTable() {
             const tbody = document.getElementById('free_accounts_body');
             const hint = document.getElementById('free_accounts_empty_hint');
@@ -3443,6 +3517,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             }
             if (hint) hint.style.display = 'none';
             tbody.innerHTML = freeAccountsList.map((row) => {
+                const id = Number(row.id);
+                const key = String(id);
                 const lockBadge = row.in_use
                     ? '<span class="status-badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">占用中</span>'
                     : '<span class="status-badge" style="opacity:.78;">空闲</span>';
@@ -3453,10 +3529,11 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 const tokenAt = row.token_updated_at ? String(row.token_updated_at).replace('T', ' ').slice(0, 19) : '-';
                 const emailArg = JSON.stringify(String(row.email || ''));
                 const actionCell = row.has_access_token
-                    ? `<button type="button" class="btn btn-primary" style="padding:8px 12px;border-radius:10px;" onclick='downloadFreeAccountCpa(${Number(row.id)}, ${emailArg})'><i data-lucide="download"></i> 下载 CPA</button>`
-                    : `<button type="button" class="btn btn-primary" style="padding:8px 12px;border-radius:10px;" onclick='refreshFreeAccountToken(${Number(row.id)}, ${emailArg})'><i data-lucide="refresh-cw"></i> 补 Token</button>`;
+                    ? `<button type="button" class="btn btn-primary" style="padding:8px 12px;border-radius:10px;" onclick='downloadFreeAccountCpa(${id}, ${emailArg})'><i data-lucide="download"></i> 下载 CPA</button>`
+                    : `<button type="button" class="btn btn-primary" style="padding:8px 12px;border-radius:10px;" onclick='refreshFreeAccountToken(${id}, ${emailArg})'><i data-lucide="refresh-cw"></i> 补 Token</button>`;
                 return `
                 <tr>
+                    <td class="select-cell"><input type="checkbox" ${selectedItems.free_account.has(key) ? 'checked' : ''} onchange="toggleSelection('free_account', '${key}', this.checked)"></td>
                     <td><code>${escapeHtml(row.email || '')}</code></td>
                     <td style="text-align:center">${tokenBadge}</td>
                     <td style="text-align:center">${lockBadge}</td>
@@ -3476,6 +3553,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     throw new Error(data.message || '加载免费号列表失败');
                 }
                 freeAccountsList = Array.isArray(data.items) ? data.items : [];
+                pruneSelection('free_account', freeAccountsList);
                 renderFreeAccountsTable();
                 if (showToast) {
                     showMessage('免费号列表已刷新', 'success');
@@ -3653,6 +3731,54 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 showMessage(`已下载 ${email} 的 CPA JSON`, 'success');
             } catch (error) {
                 showMessage(error.message || '下载 CPA 失败', 'error');
+            }
+        }
+
+        async function batchDownloadFreeAccountCpa() {
+            const ids = Array.from(selectedItems.free_account).map((id) => Number(id)).filter(Boolean);
+            if (ids.length === 0) {
+                showMessage('请选择要下载 CPA 的免费号', 'warning');
+                return;
+            }
+            const selectedRows = freeAccountsList.filter((row) => selectedItems.free_account.has(String(row.id)));
+            const missingToken = selectedRows.filter((row) => !row.has_access_token);
+            if (missingToken.length > 0) {
+                showMessage(`选中项中有 ${missingToken.length} 个免费号缺少 Token，请先补 Token 或取消选择`, 'warning');
+                return;
+            }
+            try {
+                const res = await authFetch('/api/admin/free-accounts/cpa/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                if (!res.ok) {
+                    let message = '批量下载 CPA 失败';
+                    try {
+                        const data = await res.json();
+                        message = data.message || message;
+                    } catch (_) { }
+                    throw new Error(message);
+                }
+
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename=([^;]+)/i);
+                const fileName = match ? decodeURIComponent(match[1].replace(/"/g, '').trim()) : `free-accounts.cpa.${Date.now()}.json`;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showMessage(`已批量下载 ${ids.length} 个免费号 CPA JSON`, 'success');
+                selectedItems.free_account.clear();
+                renderFreeAccountsTable();
+            } catch (error) {
+                showMessage(error.message || '批量下载 CPA 失败', 'error');
             }
         }
 

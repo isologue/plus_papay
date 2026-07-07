@@ -9,8 +9,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       MYSQL_DATABASE: ${DB_NAME:-plus_papay}
-      MYSQL_USER: ${DB_USER:-papay}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-change_me_app_password}
+      MYSQL_USER: ${MYSQL_APP_USER:-papay}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:-change_me_app_password}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root_password}
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
@@ -43,8 +43,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USER: ${DB_USER:-papay}
-      DB_PASSWORD: ${DB_PASSWORD:-change_me_app_password}
+      DB_USER: ${MYSQL_APP_USER:-papay}
+      DB_PASSWORD: ${MYSQL_APP_PASSWORD:-change_me_app_password}
       DB_NAME: ${DB_NAME:-plus_papay}
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-60}
       ASSET_LOCK_STALE_MS: ${ASSET_LOCK_STALE_MS:-900000}

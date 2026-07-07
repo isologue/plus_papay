@@ -1864,6 +1864,27 @@ app.post('/api/admin/pool-emails/import', authenticateAdmin, async (req, res) =>
     }
 });
 
+app.post('/api/admin/pool-emails/bulk-delete', authenticateAdmin, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+        const normalizedIds = Array.from(new Set(ids
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0)));
+        if (!normalizedIds.length) {
+            return res.status(400).json({ success: false, message: '请先选择要删除的邮箱' });
+        }
+        const result = await store.deletePoolEmails(normalizedIds);
+        res.json({
+            success: true,
+            deleted: result.deleted,
+            message: `已删除 ${result.deleted} 条邮箱记录`
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 app.delete('/api/admin/pool-emails/:id', authenticateAdmin, async (req, res) => {
     try {
         await ensureStoreReady();
@@ -1931,6 +1952,46 @@ app.post('/api/admin/free-accounts/generate', authenticateAdmin, async (req, res
     }
 });
 
+app.post('/api/admin/free-accounts/cpa/bulk', authenticateAdmin, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+        const normalizedIds = Array.from(new Set(ids
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0)));
+        if (!normalizedIds.length) {
+            return res.status(400).json({ success: false, message: '请先选择要下载 CPA 的免费号' });
+        }
+
+        const accounts = [];
+        const emails = [];
+        for (const id of normalizedIds) {
+            const row = await store.getPoolEmailCredentials(id);
+            if (!row || !row.registered || row.plusRegistered || row.status !== '正常') {
+                return res.status(404).json({ success: false, message: `免费号 #${id} 不存在、不可用或已不在免费号池` });
+            }
+            if (!String(row.accessToken || '').trim()) {
+                return res.status(400).json({ success: false, message: `${row.email} 缺少 Token，无法批量下载 CPA JSON` });
+            }
+            accounts.push(buildFreeAccountCpaPayload(row));
+            emails.push(row.email);
+        }
+
+        const fileName = `free-accounts.cpa.${formatCpaDownloadTimestamp()}.json`;
+        const payload = {
+            exported_at: new Date().toISOString(),
+            count: accounts.length,
+            emails,
+            accounts
+        };
+        res.setHeader('Content-Disposition', `attachment; filename=${encodeURIComponent(fileName)}`);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.send(JSON.stringify(payload, null, 2));
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 app.post('/api/admin/free-accounts/:id/refresh-token', authenticateAdmin, async (req, res) => {
     const poolEmailId = Number(req.params.id) || 0;
     try {
@@ -1940,7 +2001,7 @@ app.post('/api/admin/free-accounts/:id/refresh-token', authenticateAdmin, async 
             return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
         }
         const row = await store.getPoolEmailCredentials(poolEmailId);
-        if (!row || !row.registered || row.plusRegistered) {
+        if (!row || !row.registered || row.plusRegistered || row.status !== '正常') {
             return res.status(400).json({ success: false, message: '该邮箱当前不适合补 Token' });
         }
         if (String(row.accessToken || '').trim()) {
@@ -1963,7 +2024,7 @@ app.get('/api/admin/free-accounts/:id/cpa', authenticateAdmin, async (req, res) 
     try {
         await ensureStoreReady();
         const row = await store.getPoolEmailCredentials(poolEmailId);
-        if (!row || !row.registered || row.plusRegistered) {
+        if (!row || !row.registered || row.plusRegistered || row.status !== '正常') {
             return res.status(404).json({ success: false, message: '该免费号不存在或已不在免费号池' });
         }
         if (!String(row.accessToken || '').trim()) {

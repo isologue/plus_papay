@@ -298,6 +298,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('pool_emails', 'token_updated_at', 'TIMESTAMP NULL DEFAULT NULL');
     await ensureColumn('pool_emails', 'plus_registered', 'TINYINT(1) NOT NULL DEFAULT 0');
     await ensureColumn('pool_emails', 'plus_registered_at', 'TIMESTAMP NULL DEFAULT NULL');
+    await ensureColumn('pool_emails', 'status', "VARCHAR(32) NOT NULL DEFAULT '正常'");
 
     await ensureColumn('product_assets', 'imap_key', 'VARCHAR(64) NULL');
     await ensureColumn('product_assets', 'claimed_cdk', 'VARCHAR(32) NULL');
@@ -1126,7 +1127,7 @@ async function listPoolEmails() {
                 CASE WHEN LENGTH(TRIM(password)) > 0 THEN 1 ELSE 0 END AS has_password,
                 CASE WHEN refresh_token IS NOT NULL AND LENGTH(TRIM(refresh_token)) > 0 THEN 1 ELSE 0 END AS has_oauth,
                 access_token, auth_json,
-                registered, registered_at, plus_registered, plus_registered_at, in_use, locked_at, is_active, created_at
+                registered, registered_at, plus_registered, plus_registered_at, in_use, locked_at, is_active, status, created_at
          FROM pool_emails
          WHERE is_active = 1
          ORDER BY id ASC`
@@ -1144,6 +1145,7 @@ async function listPoolEmails() {
         plus_registered_at: row.plus_registered_at,
         in_use: Number(row.in_use || 0) === 1,
         locked_at: row.locked_at,
+        status: String(row.status || '正常'),
         created_at: row.created_at
     }));
 }
@@ -1154,6 +1156,7 @@ async function listFreePoolAccounts() {
                 registered_at, token_updated_at, in_use, locked_at, created_at
          FROM pool_emails
          WHERE is_active = 1
+           AND status = '正常'
            AND registered = 1
            AND plus_registered = 0
          ORDER BY id ASC`
@@ -1174,7 +1177,7 @@ async function listFreePoolAccounts() {
 async function getPoolEmailCredentials(id) {
     const rows = await runQuery(
         `SELECT id, email, password, client_id, refresh_token, access_token, auth_json,
-                token_updated_at, registered, registered_at, plus_registered, plus_registered_at, is_active
+                token_updated_at, registered, registered_at, plus_registered, plus_registered_at, is_active, status
          FROM pool_emails
          WHERE id = ?
          LIMIT 1`,
@@ -1199,12 +1202,28 @@ async function getPoolEmailCredentials(id) {
         registered: Number(row.registered || 0) === 1,
         registeredAt: row.registered_at,
         plusRegistered: Number(row.plus_registered || 0) === 1,
-        plusRegisteredAt: row.plus_registered_at
+        plusRegisteredAt: row.plus_registered_at,
+        status: String(row.status || '正常')
     };
 }
 
 async function deletePoolEmail(id) {
     await runExecute(`DELETE FROM pool_emails WHERE id = ?`, [Number(id)]);
+}
+
+async function deletePoolEmails(ids = []) {
+    const normalizedIds = Array.from(new Set((Array.isArray(ids) ? ids : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0)));
+    if (!normalizedIds.length) {
+        return { deleted: 0 };
+    }
+
+    const result = await runExecute(
+        `DELETE FROM pool_emails WHERE id IN (${normalizedIds.map(() => '?').join(',')})`,
+        normalizedIds
+    );
+    return { deleted: Number(result?.affectedRows || 0) };
 }
 
 async function reservePoolEmail(ownerKey = '', options = {}) {
@@ -1252,6 +1271,7 @@ async function reservePoolEmail(ownerKey = '', options = {}) {
             `SELECT id, email, password, client_id, refresh_token, access_token, auth_json, registered, plus_registered
              FROM pool_emails
              WHERE is_active = 1
+               AND status = '正常'
                AND plus_registered = 0
                ${candidateSql}
                ${targetSql}
@@ -1299,6 +1319,22 @@ async function releasePoolEmailReservation(id) {
          SET in_use = 0, locked_at = NULL, locked_by = NULL
          WHERE id = ?
            AND plus_registered = 0`,
+        [Number(id)]
+    );
+}
+
+async function markPoolEmailUnavailable(id, reason = '') {
+    if (!id) {
+        return;
+    }
+
+    await runExecute(
+        `UPDATE pool_emails
+         SET status = '不可用',
+             in_use = 0,
+             locked_at = NULL,
+             locked_by = NULL
+         WHERE id = ?`,
         [Number(id)]
     );
 }
@@ -1910,8 +1946,10 @@ module.exports = {
     listFreePoolAccounts,
     getPoolEmailCredentials,
     deletePoolEmail,
+    deletePoolEmails,
     reservePoolEmail,
     releasePoolEmailReservation,
+    markPoolEmailUnavailable,
     markPoolEmailRegistered,
     markPoolEmailPlusRegisteredByEmail,
     getRuntimeAssets,

@@ -148,7 +148,7 @@ async function run() {
     // 切到有头模式调试：HEADFUL=1 node server.js 或 HEADFUL=1 node index.js
     const DEBUG_HEADFUL = process.env.HEADFUL === '1';
     // 选择真实 Google Chrome：CHROMIUM_CHANNEL=chrome（机器需安装 Google Chrome）
-    const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
+    const CHROMIUM_CHANNEL = normalizeChromiumChannel(process.env.CHROMIUM_CHANNEL);
 
     const launchArgs = [
         '--disable-blink-features=AutomationControlled'
@@ -1949,6 +1949,11 @@ async function run() {
         console.log("👋 [系统] 流程结束，正在关闭浏览器...");
         await browser.close().catch(() => { });
     }
+}
+
+function normalizeChromiumChannel(value) {
+    const raw = String(value || '').split('#')[0].trim().toLowerCase();
+    return ['chrome', 'msedge'].includes(raw) ? raw : '';
 }
 
 run();

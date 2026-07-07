@@ -36,3 +36,7 @@ ALTER TABLE product_assets
 -- 4. 保险兜底：如果唯一索引不存在，补上
 ALTER TABLE product_assets
     ADD UNIQUE KEY IF NOT EXISTS uniq_product_assets_email (email);
+
+-- 5. 邮箱池状态：用于标记微软 service abuse 等不可用邮箱，保留记录但不再参与注册
+ALTER TABLE pool_emails
+    ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT '正常' AFTER sort_order;

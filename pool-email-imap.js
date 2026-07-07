@@ -6,6 +6,21 @@ const axios = require('axios');
 const MS_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 // IMAP + offline_access：换 access_token 给 IMAP 用
 const MS_IMAP_SCOPE = 'https://outlook.office.com/IMAP.AccessAsUser.All offline_access';
+const MICROSOFT_SERVICE_ABUSE_ERROR_CODE = 'MICROSOFT_SERVICE_ABUSE_MODE';
+
+function isMicrosoftServiceAbuseMessage(value) {
+    const text = String(value || '');
+    return /AADSTS70000/i.test(text) && /service abuse mode/i.test(text);
+}
+
+function isMicrosoftServiceAbuseError(error) {
+    if (!error) {
+        return false;
+    }
+    return error.code === MICROSOFT_SERVICE_ABUSE_ERROR_CODE
+        || isMicrosoftServiceAbuseMessage(error.message)
+        || isMicrosoftServiceAbuseMessage(error.stack);
+}
 
 function stripHtml(html) {
     return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -137,7 +152,11 @@ async function refreshMicrosoftAccessToken({ clientId, refreshToken }) {
         const err = resp.data && (resp.data.error_description || resp.data.error)
             ? `${resp.data.error || ''} ${resp.data.error_description || ''}`.trim()
             : `HTTP ${resp.status}`;
-        throw new Error(`刷新 access_token 失败: ${err}`);
+        const error = new Error(`刷新 access_token 失败: ${err}`);
+        if (isMicrosoftServiceAbuseMessage(err)) {
+            error.code = MICROSOFT_SERVICE_ABUSE_ERROR_CODE;
+        }
+        throw error;
     }
     return String(resp.data.access_token);
 }
@@ -279,5 +298,8 @@ async function listRecentEmailsForAdmin({
 module.exports = {
     fetchLatestOpenAiOtpOnce,
     listRecentEmailsForAdmin,
-    refreshMicrosoftAccessToken
+    refreshMicrosoftAccessToken,
+    isMicrosoftServiceAbuseError,
+    isMicrosoftServiceAbuseMessage,
+    MICROSOFT_SERVICE_ABUSE_ERROR_CODE
 };

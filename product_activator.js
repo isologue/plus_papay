@@ -18,6 +18,12 @@ const CONFIG = {
 const IMAP_ADMIN_EMAIL_API = 'https://imap.chiyiyi.cloud/api/admin/emails';
 const OAUTH_ADD_PHONE_ERROR = '当前账号触发手机号验证';
 const POOL_EMAIL_EXHAUSTED_ERROR = '邮箱池无可用预留邮箱（资产池枯竭），停止生产';
+const POOL_EMAIL_SERVICE_ABUSE_ERROR = 'POOL_EMAIL_SERVICE_ABUSE_MODE';
+
+function isPoolEmailServiceAbuseError(error) {
+    const text = String(error?.message || error || '');
+    return /AADSTS70000/i.test(text) && /service abuse mode/i.test(text);
+}
 
 // 进程级 inbox 域名黑名单：被 API 拒绝过的域名，本进程内不再传给子进程
 // 重启 server 后会清空（管理员若改过 API 配置就会重试）
@@ -912,6 +918,14 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '', stopCheck 
         };
     } catch (error) {
         if (poolSlot?.id) {
+            if (isPoolEmailServiceAbuseError(error)) {
+                await store.markPoolEmailUnavailable(poolSlot.id, error.message).catch((markErr) => {
+                    console.warn(`[PoolEmail] mark unavailable failed id=${poolSlot.id}: ${markErr.message}`);
+                });
+                const wrapped = new Error(`${POOL_EMAIL_SERVICE_ABUSE_ERROR}: ${poolSlot.email || poolSlot.id} ${error.message}`);
+                wrapped.code = POOL_EMAIL_SERVICE_ABUSE_ERROR;
+                throw wrapped;
+            }
             await store.releasePoolEmailReservation(poolSlot.id).catch(() => { });
         }
         throw error;
@@ -1365,16 +1379,37 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
 async function createFreePoolAccount(progressCallback = () => { }, options = {}) {
     const runtimeJobKey = String(options.jobKey || '');
     const stopCheck = typeof options.stopCheck === 'function' ? options.stopCheck : null;
-    const result = await runRegistrationProcess((payload) => {
-        progressCallback(payload);
-    }, runtimeJobKey, stopCheck, {
-        forceEmailSource: 'pool',
-        includeRegisteredFree: false,
-        includeRegisteredMissingToken: true,
-        allowUnregistered: true,
-        targetPoolEmailId: Number(options.poolEmailId || 0) || 0,
-        keepPoolReservation: false
-    });
+    const targetPoolEmailId = Number(options.poolEmailId || 0) || 0;
+    const maxServiceAbuseSkips = targetPoolEmailId ? 1 : 100;
+    let serviceAbuseSkips = 0;
+    let result = null;
+
+    while (!result) {
+        try {
+            result = await runRegistrationProcess((payload) => {
+                progressCallback(payload);
+            }, runtimeJobKey, stopCheck, {
+                forceEmailSource: 'pool',
+                includeRegisteredFree: false,
+                includeRegisteredMissingToken: true,
+                allowUnregistered: true,
+                targetPoolEmailId,
+                keepPoolReservation: false
+            });
+        } catch (error) {
+            if (error?.code !== POOL_EMAIL_SERVICE_ABUSE_ERROR && !String(error?.message || '').includes(POOL_EMAIL_SERVICE_ABUSE_ERROR)) {
+                throw error;
+            }
+            serviceAbuseSkips += 1;
+            progressCallback({
+                progress: 10,
+                message: `邮箱触发微软 service abuse，已标记不可用并跳过（${serviceAbuseSkips}）...`
+            });
+            if (serviceAbuseSkips >= maxServiceAbuseSkips) {
+                throw error;
+            }
+        }
+    }
 
     return {
         success: true,
