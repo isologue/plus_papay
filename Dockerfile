@@ -8,6 +8,9 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# 使用 Debian 仓库里的系统 Chromium，避免 Playwright 再下载约 170 MiB 的 CFT 压缩包。
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' > /etc/apt/apt.conf.d/80-retries
 RUN set -eux; \
@@ -31,12 +34,12 @@ RUN set -eux; \
             -e "s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
             /etc/apt/sources.list; \
     fi; \
-    apt-get update
+    apt-get update; \
+    apt-get install -y --no-install-recommends chromium xvfb; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-RUN npx playwright install-deps chromium
-RUN npx playwright install chromium
 
 COPY . .
 

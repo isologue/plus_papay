@@ -490,27 +490,6 @@ function isOauthAddPhoneError(result) {
         || combinedText.includes('add-phone');
 }
 
-async function runActivationProcess(accessToken, cdk, runtimeAssets, runtimeJobKey = '') {
-    return runActivationChild(
-        path.join(__dirname, 'index.js'),
-        [],
-        {
-            ...process.env,
-            CHATGPT_TOKEN: accessToken,
-            CDK_CODE: cdk,
-            SMS_API_KEY: runtimeAssets?.phone?.key || '',
-            BILLING_PHONE: runtimeAssets?.phone?.phone || '',
-            PROXY: runtimeAssets?.proxy || '',
-            CARD_NUMBER: runtimeAssets?.card?.number || '',
-            CARD_EXPIRY: runtimeAssets?.card?.expiry || '',
-            CARD_CVC: runtimeAssets?.card?.cvc || '',
-            IS_PRODUCT_FLOW: 'true'
-        },
-        undefined,
-        { runtimeJobKey: String(runtimeJobKey || '') }
-    );
-}
-
 async function runActivationChild(scriptPath, args, env, onLine, options = {}) {
     return new Promise((resolve, reject) => {
         const runtimeJobKey = String(options.runtimeJobKey || '');
@@ -821,6 +800,10 @@ async function runRegistrationProcess(onProgress, runtimeJobKey = '', stopCheck 
             .trim().replace(/\/+$/, '') || 'https://temp-email-api.jzqkwl.com';
         childEnv.INBOX_EMAIL_DOMAIN = String(await store.getAppConfigValue('inbox_email_domain', ''))
             .trim().replace(/^@/, '');
+        childEnv.INBOX_ADMIN_PASSWORD = String(await store.getAppConfigValue('inbox_admin_password', ''));
+        childEnv.INBOX_ENABLE_RANDOM_SUBDOMAIN = String(await store.getAppConfigValue('inbox_enable_random_subdomain', '1')) === '0'
+            ? '0'
+            : '1';
         // 多域名：一行一个 / 逗号 / 分号 / 空格分隔，子进程会随机挑一个
         // 过滤掉本进程已知被 API 拒绝的无效域名，避免每次 fork 重复试错
         const inboxDomainsRaw = String(await store.getAppConfigValue('inbox_email_domains', '')).trim();
@@ -998,7 +981,7 @@ async function runProtocolProcess(email, onProgress, runtimeJobKey = '', inboxBu
     throw new Error(lastError || `协议提取失败，已超过 ${CONFIG.MAX_PROTOCOL_RETRIES} 次重试`);
 }
 
-async function startProductCreation(cdk, progressCallback, options = {}) {
+async function startProductCreation(progressCallback, options = {}) {
     let accountAttempt = 0;
     let topupFailureCount = 0;
     const runtimeJobKey = String(options.jobKey || '');
@@ -1009,13 +992,13 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
             throw new Error('管理员已停止成品批量生产');
         }
     };
-    const ownerKey = `prod:${cdk || 'admin'}:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const ownerKey = `prod:admin:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     runtimeLog.push({
         jobKey: runtimeJobKey,
         level: 'product',
         source: 'product',
-        text: `🎬 [成品流程] 开始  CDK = ${cdk || '(后台批量)'}`
+        text: '🎬 [成品流程] 开始（后台批量）'
     });
 
     while (accountAttempt < CONFIG.MAX_ACCOUNT_RETRIES) {
@@ -1116,7 +1099,6 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
                     {
                         ...process.env,
                         CHATGPT_TOKEN: accessToken,
-                        CDK_CODE: cdk,
                         SMS_API_KEY: runtimeAssets?.phone?.key || '',
                         BILLING_PHONE: runtimeAssets?.phone?.phone || '',
                         PROXY: runtimeAssets?.proxy || '',
@@ -1389,9 +1371,10 @@ async function createFreePoolAccount(progressCallback = () => { }, options = {})
             result = await runRegistrationProcess((payload) => {
                 progressCallback(payload);
             }, runtimeJobKey, stopCheck, {
-                forceEmailSource: 'pool',
+                // 新生成免费号遵循全局 email_source；仅补 Token 时强制保留目标邮箱池流程。
+                forceEmailSource: targetPoolEmailId ? 'pool' : undefined,
                 includeRegisteredFree: false,
-                includeRegisteredMissingToken: true,
+                includeRegisteredMissingToken: Boolean(targetPoolEmailId),
                 allowUnregistered: true,
                 targetPoolEmailId,
                 keepPoolReservation: false
@@ -1411,17 +1394,25 @@ async function createFreePoolAccount(progressCallback = () => { }, options = {})
         }
     }
 
+    // random / inbox 新注册的账号都要进入免费号池；邮箱池来源则复用原有记录。
+    const freePoolEmailId = result.poolEmailId
+        ? result.poolEmailId
+        : await store.saveGeneratedFreePoolAccount({
+            email: result.email,
+            accessToken: result.accessToken,
+            authJson: result.sessionAuth
+        });
+
     return {
         success: true,
         email: result.email,
-        poolEmailId: result.poolEmailId || 0,
-        mode: result.poolEmailId && result.emailSource === 'pool' && result.accessToken ? 'token_ready' : 'registered'
+        poolEmailId: freePoolEmailId,
+        mode: result.poolEmailId && result.accessToken ? 'token_ready' : 'registered'
     };
 }
 
 if (require.main === module) {
-    const cdk = process.argv[2];
-    startProductCreation(cdk, console.log).catch(console.error);
+    startProductCreation(console.log).catch(console.error);
 }
 
 module.exports = { startProductCreation, createFreePoolAccount };

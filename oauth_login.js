@@ -864,6 +864,9 @@ async function runFullProtocolFlow(email) {
         const launchOptions = {
             headless: true
         };
+        if (process.env.CHROMIUM_EXECUTABLE_PATH) {
+            launchOptions.executablePath = process.env.CHROMIUM_EXECUTABLE_PATH;
+        }
         const playwrightProxy = buildPlaywrightProxy(proxyValue);
         if (playwrightProxy) {
             launchOptions.proxy = playwrightProxy;

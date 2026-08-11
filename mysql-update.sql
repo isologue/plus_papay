@@ -1,18 +1,14 @@
--- 从旧版 schema 升级到当前本地代码所需结构
+-- 从旧版 schema 升级到当前后台管理代码所需结构。
 -- 执行前请确认已选择正确数据库，例如: USE gpt;
 
--- 1. cdk_codes 扩展字段
-ALTER TABLE cdk_codes
-    ADD COLUMN IF NOT EXISTS type VARCHAR(16) NOT NULL DEFAULT '自助' AFTER updated_at,
-    ADD COLUMN IF NOT EXISTS fail_count INT NOT NULL DEFAULT 0 AFTER type,
-    ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP NULL DEFAULT NULL AFTER fail_count;
-
--- 2. 成品号池
+-- 成品号池：保留已有数据，只补齐当前功能使用的字段。
 CREATE TABLE IF NOT EXISTS product_assets (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) NOT NULL,
+    imap_key VARCHAR(64) NULL,
     password VARCHAR(255) NULL,
     token TEXT NULL,
+    auth_json TEXT NULL,
     file_path VARCHAR(512) NULL,
     status VARCHAR(32) NOT NULL DEFAULT '正常',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -22,21 +18,23 @@ CREATE TABLE IF NOT EXISTS product_assets (
     UNIQUE KEY uniq_product_assets_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 3. 保险兜底：如果 product_assets 是旧表结构，补齐字段
 ALTER TABLE product_assets
-    ADD COLUMN IF NOT EXISTS password VARCHAR(255) NULL AFTER email,
+    ADD COLUMN IF NOT EXISTS imap_key VARCHAR(64) NULL AFTER email,
+    ADD COLUMN IF NOT EXISTS password VARCHAR(255) NULL AFTER imap_key,
     ADD COLUMN IF NOT EXISTS token TEXT NULL AFTER password,
-    ADD COLUMN IF NOT EXISTS file_path VARCHAR(512) NULL AFTER token,
+    ADD COLUMN IF NOT EXISTS auth_json TEXT NULL AFTER token,
+    ADD COLUMN IF NOT EXISTS file_path VARCHAR(512) NULL AFTER auth_json,
     ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT '正常' AFTER file_path,
     ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER status,
     ADD COLUMN IF NOT EXISTS shipped TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active,
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER shipped,
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
 
--- 4. 保险兜底：如果唯一索引不存在，补上
 ALTER TABLE product_assets
     ADD UNIQUE KEY IF NOT EXISTS uniq_product_assets_email (email);
 
--- 5. 邮箱池状态：用于标记微软 service abuse 等不可用邮箱，保留记录但不再参与注册
+-- 邮箱池状态：保留记录但禁止不可用邮箱继续参与注册。
 ALTER TABLE pool_emails
     ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT '正常' AFTER sort_order;
+
+ALTER TABLE task_logs MODIFY COLUMN message TEXT NULL;

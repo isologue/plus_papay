@@ -68,7 +68,6 @@ async function ensureProductAssetsTable(connection) {
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 email VARCHAR(255) NOT NULL,
                 imap_key VARCHAR(64) NULL,
-                claimed_cdk VARCHAR(32) NULL,
                 password VARCHAR(255) NULL,
                 token TEXT NULL,
                 file_path VARCHAR(512) NULL,
@@ -86,7 +85,6 @@ async function ensureProductAssetsTable(connection) {
 
     console.log('= 表已存在 product_assets');
     await ensureColumn(connection, 'product_assets', 'imap_key', 'VARCHAR(64) NULL');
-    await ensureColumn(connection, 'product_assets', 'claimed_cdk', 'VARCHAR(32) NULL');
     await ensureColumn(connection, 'product_assets', 'password', 'VARCHAR(255) NULL');
     await ensureColumn(connection, 'product_assets', 'token', 'TEXT NULL');
     await ensureColumn(connection, 'product_assets', 'file_path', 'VARCHAR(512) NULL');
@@ -142,9 +140,6 @@ async function run() {
     try {
         console.log(`连接成功: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}`);
 
-        await ensureColumn(connection, 'cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '自助'");
-        await ensureColumn(connection, 'cdk_codes', 'fail_count', 'INT NOT NULL DEFAULT 0');
-        await ensureColumn(connection, 'cdk_codes', 'cooldown_until', 'TIMESTAMP NULL DEFAULT NULL');
 
         await ensureProductAssetsTable(connection);
         await ensureActivationAttemptLimitsTable(connection);

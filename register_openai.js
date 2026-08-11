@@ -1054,6 +1054,8 @@ async function runRegistrationFlow() {
 
     const emailSource = String(process.env.EMAIL_SOURCE || 'random').toLowerCase();
     const inboxApiBase = String(process.env.INBOX_API_BASE || 'https://temp-email-api.jzqkwl.com').trim().replace(/\/+$/, '');
+    const inboxAdminPassword = String(process.env.INBOX_ADMIN_PASSWORD || '');
+    const inboxEnableRandomSubdomain = String(process.env.INBOX_ENABLE_RANDOM_SUBDOMAIN || '1') !== '0';
     const inboxEmailDomain = String(process.env.INBOX_EMAIL_DOMAIN || '').trim().replace(/^@/, '');
     // 多域名候选：每次随机挑一个，避免单一域名被风控/限频
     const inboxEmailDomainsList = String(process.env.INBOX_EMAIL_DOMAINS || '')
@@ -1104,7 +1106,10 @@ async function runRegistrationFlow() {
             try {
                 const newInbox = await inboxEmail.createAddress({
                     baseUrl: inboxApiBase,
-                    domain: tryDomain || undefined
+                    name: 'admin',
+                    adminPassword: inboxAdminPassword,
+                    domain: tryDomain || undefined,
+                    enableRandomSubdomain: inboxEnableRandomSubdomain
                 });
                 email = newInbox.address;
                 inboxJwt = newInbox.jwt;
@@ -1140,6 +1145,7 @@ async function runRegistrationFlow() {
     const DEBUG_HEADFUL = process.env.HEADFUL === '1';
     const DEBUG_PAUSE_ON_ERROR_MS = Number(process.env.DEBUG_PAUSE_ON_ERROR_MS || (DEBUG_HEADFUL ? 30000 : 0));
     const CHROMIUM_CHANNEL = normalizeChromiumChannel(process.env.CHROMIUM_CHANNEL);
+    const CHROMIUM_EXECUTABLE_PATH = process.env.CHROMIUM_EXECUTABLE_PATH;
 
     let browser;
     let page = null;
@@ -1158,6 +1164,8 @@ async function runRegistrationFlow() {
         };
         if (CHROMIUM_CHANNEL) {
             launchOptions.channel = CHROMIUM_CHANNEL; // 'chrome' / 'msedge'
+        } else if (CHROMIUM_EXECUTABLE_PATH) {
+            launchOptions.executablePath = CHROMIUM_EXECUTABLE_PATH;
         }
 
         const proxyConfig = buildPlaywrightProxy(proxyValue);
@@ -1171,7 +1179,20 @@ async function runRegistrationFlow() {
 
         browser = await chromium.launch(launchOptions);
 
-        // 取浏览器真实 UA，避免与 Client Hints 不一致（hCaptcha invisible 会查这个一致性）
+        // OpenAI 的鉴权页会校验 User-Agent、Client Hints 和 navigator 实际环境的一致性。
+        // 之前这里把 Linux Chromium 强行伪装成 Windows，并叠加了整套自定义指纹，
+        // 会触发 “Your session has ended”，导致注册页的注册链接永远不存在。
+        // 默认使用 Chromium 原生上下文；只有显式设置 OPENAI_STRICT_FINGERPRINT=1
+        // 才启用旧的兼容模式，便于针对特定代理环境回退排查。
+        const useStrictFingerprint = /^(1|true|yes)$/i.test(String(process.env.OPENAI_STRICT_FINGERPRINT || ''));
+        let context;
+        if (!useStrictFingerprint) {
+            context = await browser.newContext({
+                viewport: { width: 1280, height: 720 }
+            });
+            console.log('🛡️  [Browser] 使用原生 Chromium 浏览器上下文，避免伪造 Client Hints 导致会话失效。');
+        } else {
+        // 取浏览器真实 UA，避免与 Client Hints 不一致（兼容旧的严格指纹模式）
         const realUserAgent = (await (async () => {
             try {
                 const tmpCtx = await browser.newContext();
@@ -1188,7 +1209,7 @@ async function runRegistrationFlow() {
         const matchedReg = realUserAgent.match(/Chrome\/(\d+)/);
         const chromeMajorReg = matchedReg ? Number(matchedReg[1]) : 147;
 
-        const context = await browser.newContext({
+            context = await browser.newContext({
             userAgent: realUserAgent,
             viewport: { width: 1280, height: 720 },
             deviceScaleFactor: 1,
@@ -1388,6 +1409,7 @@ async function runRegistrationFlow() {
                 }
             } catch (_) { }
         }, chromeMajorReg);
+        }
 
         page = await context.newPage();
 
@@ -1415,13 +1437,11 @@ async function runRegistrationFlow() {
 
         const restartFromCreateAccount = async () => {
             console.warn("⚠️  [Warn] 检测到超时错误页，准备从创建账户重新开始并重新提交邮箱...");
-            await page.goto("https://auth.openai.com/log-in/password", { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForSelector('a[data-dd-action-name="(Missing Session) Log in to ChatGPT"]', { visible: true, timeout: 30000 });
-            await sleep(Math.random() * 1200 + 800);
-            await humanClick(page, 'a[data-dd-action-name="(Missing Session) Log in to ChatGPT"]');
-            await page.waitForSelector('a[href="/create-account"]', { visible: true, timeout: 30000 });
-            await sleep(Math.random() * 1200 + 600);
-            await humanClick(page, 'a[href="/create-account"]');
+            // 先打开 OpenAI 主站建立 auth/openai.com 所需的站点会话，再进入统一登录页。
+            // 直接访问 auth.openai.com 在无会话时会显示 “Your session has ended”。
+            await page.goto("https://openai.com/", { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(1200);
+            await page.goto("https://auth.openai.com/log-in", { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForSelector('input[type="email"]', { visible: true, timeout: 30000 });
             await sleep(Math.random() * 1200 + 600);
             console.log("ℹ️  [Info] 超时恢复：正在重新输入邮箱...");
@@ -1518,6 +1538,10 @@ async function runRegistrationFlow() {
                     continue;
                 }
 
+                if (await isAuthErrorPage()) {
+                    return 'session-ended';
+                }
+
                 if (await page.locator('input[name="new-password"]').first().isVisible().catch(() => false)) {
                     return 'password';
                 }
@@ -1579,19 +1603,100 @@ async function runRegistrationFlow() {
                 if (u.includes('/auth/error') || u.includes('chatgpt.com/api/auth/error')) {
                     return true;
                 }
+                const title = String(await page.title().catch(() => '') || '').toLowerCase();
                 const bodyText = String(await page.textContent('body', { timeout: 1500 }).catch(() => '') || '').toLowerCase();
-                return bodyText.includes('access denied')
-                    || bodyText.includes('something went wrong, please try again later')
-                    || bodyText.includes('unable to load');
+                const pageText = `${title}\n${bodyText}`;
+                return pageText.includes('your session has ended')
+                    || pageText.includes('access denied')
+                    || pageText.includes('something went wrong, please try again later')
+                    || pageText.includes('sorry, you have been blocked');
             } catch (_) {
                 return false;
             }
+        };
+
+        const isOpenAiUnavailablePage = async () => {
+            try {
+                const bodyText = String(await page.textContent('body', { timeout: 1500 }).catch(() => '') || '').toLowerCase();
+                return bodyText.includes('unable to load site')
+                    || bodyText.includes('please try again later')
+                    || bodyText.includes('check the status page for information on outages');
+            } catch (_) {
+                return false;
+            }
+        };
+
+        // Cloudflare 的临时安全校验不是业务鉴权失败，不能直接当成代理错误退出。
+        // 该页面有时会在首次导航短暂返回 403/Just a moment，等待或刷新后即可恢复。
+        const isCloudflareChallengePage = async () => {
+            try {
+                const title = String(await page.title().catch(() => '') || '').toLowerCase();
+                const bodyText = String(await page.textContent('body', { timeout: 1500 }).catch(() => '') || '').toLowerCase();
+                return title.includes('just a moment')
+                    || bodyText.includes('performing security verification')
+                    || bodyText.includes('verify you are human')
+                    || bodyText.includes('checking your browser');
+            } catch (_) {
+                return false;
+            }
+        };
+
+        const openAuthEmailPage = async (maxAttempts = 3) => {
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    // auth.openai.com 会在无效/过期会话上短暂显示登录框，随后切到
+                    // “Your session has ended”。每次尝试都清掉旧的站点会话，并在登录框
+                    // 出现后立刻填写，避免人为等待让页面先被风控切走。
+                    await context.clearCookies().catch(() => { });
+                    await page.goto("https://openai.com/", { waitUntil: 'domcontentloaded', timeout: 30000 });
+                    await page.goto("https://auth.openai.com/log-in", { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+                    const deadline = Date.now() + 12000;
+                    while (Date.now() < deadline) {
+                        if (await page.locator('input[type="email"]').first().isVisible().catch(() => false)) {
+                            return true;
+                        }
+                        if (await isOpenAiUnavailablePage()) {
+                            throw new Error(`OpenAI 登录页不可用（Unable to load site），当前出口被拒绝或服务端返回 403，URL=${page.url()}`);
+                        }
+                        if (await isAuthErrorPage()) {
+                            throw new Error('OpenAI 登录会话在邮箱框出现前已结束');
+                        }
+                        if (await isCloudflareChallengePage()) {
+                            await page.waitForTimeout(2500);
+                            continue;
+                        }
+                        await page.waitForTimeout(250);
+                    }
+                    throw new Error('OpenAI 登录页邮箱框未及时出现');
+                } catch (error) {
+                    lastError = error;
+                    console.warn(`⚠️  [Warn] OpenAI 登录页第 ${attempt}/${maxAttempts} 次准备失败: ${error.message}`);
+                    if (attempt < maxAttempts) {
+                        await page.waitForTimeout(500);
+                    }
+                }
+            }
+            throw lastError || new Error('OpenAI 登录页准备失败');
         };
 
         // 自动刷新辅助函数：如果页面内容过少（空白）或崩溃，则持续刷新直到成功或达到上限
         const ensurePageLoaded = async (selector, actionName = "未知步骤", maxReloads = 5, waitTimeout = 30000) => {
             for (let i = 0; i < maxReloads; i++) {
                 try {
+                    // Cloudflare 临时校验先等待/刷新，不要误判为 OpenAI 鉴权错误。
+                    if (await isCloudflareChallengePage()) {
+                        console.warn(`⚠️  [Warn] ${actionName} 命中 Cloudflare 临时校验，等待后重试...`);
+                        await page.waitForTimeout(5000);
+                        if (!selector || await page.locator(selector).first().isVisible().catch(() => false)) {
+                            return true;
+                        }
+                        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+                        await page.waitForTimeout(1500);
+                        continue;
+                    }
+
                     // 命中 OpenAI auth/error → 立即抛错让父进程换代理重试，不再耗时刷新
                     if (await isAuthErrorPage()) {
                         throw new Error(`OpenAI 鉴权服务异常 (auth/error)，需要换代理重试，URL=${page.url()}`);
@@ -1631,6 +1736,14 @@ async function runRegistrationFlow() {
                     }
                     return true; // 成功加载
                 } catch (err) {
+                    // Cloudflare 临时校验继续走刷新重试，不要直接结束任务。
+                    if (await isCloudflareChallengePage()) {
+                        console.warn(`⚠️  [Warn] ${actionName} 仍在 Cloudflare 校验页，继续刷新...`);
+                        await page.waitForTimeout(3000);
+                        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+                        continue;
+                    }
+
                     // OpenAI 鉴权出错页：让它快速失败，不要再循环刷新了
                     if (String(err?.message || '').includes('OpenAI 鉴权服务异常')
                         || (await isAuthErrorPage())) {
@@ -1657,30 +1770,39 @@ async function runRegistrationFlow() {
             throw new Error(`${actionName} 失败：多次刷新或崩溃后页面仍无法正常显示`);
         };
 
-        await page.goto("https://auth.openai.com/log-in/password", { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await ensurePageLoaded('a[data-dd-action-name="(Missing Session) Log in to ChatGPT"]', "登录入口加载");
-
-        await sleep(Math.random() * 2000 + 1000);
-        await humanClick(page, 'a[data-dd-action-name="(Missing Session) Log in to ChatGPT"]');
-
-        await ensurePageLoaded('a[href="/create-account"]', "注册链接加载", 5, 50000);
-        await sleep(Math.random() * 1500 + 500);
-        await humanClick(page, 'a[href="/create-account"]');
-        await recoverOperationTimeout();
-
-        console.log("📧 ℹ️  [Info] 正在输入邮箱...");
-
-        await ensurePageLoaded('input[type="email"]', "邮箱输入框加载");
-        await recoverOperationTimeout();
-        await sleep(Math.random() * 1500 + 1000);
-        await ensureInputValue(page, 'input[type="email"]', email, '邮箱输入框');
-
-        await sleep(Math.random() * 1000 + 800); // 拟人提交前停顿
-        await humanClick(page, 'button[type="submit"]');
-
-        console.log("⏳ [等待] 正在检测下一步流程（验证码 / 创建密码 / 合并页）...");
-        await recoverOperationTimeout();
-        const nextStep = await waitForNextRegistrationStep(20000);
+        // OpenAI 登录框目前只能维持很短时间，不能在邮箱框出现后再做随机等待。
+        // 如果风控在提交前把会话切走，重新建立会话并立即重试，而不是等待 30 秒超时。
+        let nextStep = 'unknown';
+        let emailSubmitted = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            await openAuthEmailPage(3);
+            await recoverOperationTimeout();
+            console.log(`📧 ℹ️  [Info] 正在输入邮箱 (尝试 ${attempt}/3)...`);
+            try {
+                await ensureInputValue(page, 'input[type="email"]', email, '邮箱输入框');
+                if (await isAuthErrorPage()) {
+                    throw new Error('输入邮箱前登录会话已结束');
+                }
+                await humanClick(page, 'button[type="submit"]');
+                emailSubmitted = true;
+                console.log("⏳ [等待] 正在检测下一步流程（验证码 / 创建密码 / 合并页）...");
+                await recoverOperationTimeout();
+                nextStep = await waitForNextRegistrationStep(20000);
+                if (nextStep !== 'session-ended' && nextStep !== 'unknown') {
+                    break;
+                }
+                console.warn(`⚠️  [Warn] 邮箱提交后 OpenAI 会话状态异常 (${nextStep})，立即重建登录页重试...`);
+                emailSubmitted = false;
+            } catch (error) {
+                if (!(await isAuthErrorPage())) {
+                    throw error;
+                }
+                console.warn(`⚠️  [Warn] OpenAI 会话在提交阶段结束，立即重试: ${error.message}`);
+            }
+        }
+        if (!emailSubmitted || nextStep === 'session-ended' || nextStep === 'unknown') {
+            throw new Error('OpenAI 登录会话在提交邮箱后持续失效，需要更换代理或本机出口');
+        }
 
         if (nextStep === 'password') {
             console.log("🔒 [Step 4.5] 检测到创建密码页面，正在生成随机密码...");

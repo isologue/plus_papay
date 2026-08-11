@@ -2,7 +2,7 @@
 
 > **ChatGPT Plus 自动化开通工具（PayPal 通道）**  
 > 注册 OpenAI 账号 → 走 0 元 Stripe Checkout → PayPal 支付占位 → 拉取 OAuth 协议 token → 自动入库出货。  
-> 全流程后台管理、CDK 兑换、子进程并发、Playwright Stealth + 反指纹方案。
+> 仅提供后台管理、子进程并发、Playwright Stealth + 反指纹方案。
 
 [License: MIT](LICENSE)
 Node
@@ -28,7 +28,6 @@ Status
 
 它的常见用途：
 
-- 给 CDK 自助兑换站做后端供货
 - 跑批量 ChatGPT Plus 协议 token，供 Plus API/中转使用
 - 验证一种「PayPal hosted checkout + 风控对抗」的实战方案
 
@@ -41,14 +40,14 @@ Status
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                          server.js (Express)                    │
-│  /api/admin/*    /api/cdk/*    /api/redeem/*    /api/public/*   │
+│                       /api/admin/*                            │
 └─────────────────────────────────────────────────────────────────┘
                 │                                       │
                 ▼                                       ▼
 ┌──────────────────────────┐            ┌──────────────────────────┐
 │   product_activator.js   │            │    public/admin.html     │
 │   • 任务调度 / 重试       │            │    • 后台单页面 (SPA)     │
-│   • 资产池 reserve / lock │            │    • 任务、CDK、资产池    │
+│   • 资产池 reserve / lock │            │    • 任务、资产池、配置   │
 │   • 子进程错误分类        │            │    • 系统配置 / 邮箱管理  │
 └──────────────────────────┘            └──────────────────────────┘
         │              │
@@ -193,7 +192,7 @@ http://localhost:3000
 MySQL => root@127.0.0.1:3306/plus_papay
 ```
 
-打开 [http://localhost:3000/admin](http://localhost:3000/admin) 用 `ADMIN_PASSWORD` 登录即可。
+打开 [http://localhost:3000](http://localhost:3000) 会自动跳转到后台登录页；使用 `ADMIN_PASSWORD` 登录即可。
 
 ### 5. 第一次跑一单
 
@@ -221,9 +220,8 @@ MySQL => root@127.0.0.1:3306/plus_papay
 ├── runtime-log.js           # 内存环形 buffer + WebSocket 广播
 ├── mysql-schema.sql         # 全套表结构（启动时也会自动建表）
 ├── public/
-│   ├── admin.html           # 后台单页面 SPA（任务/CDK/资产/配置/邮箱/日志）
+│   ├── admin.html           # 后台单页面 SPA（任务/资产/配置/邮箱/日志）
 │   ├── admin-login.html
-│   └── index.html           # 用户侧 CDK 兑换页
 ├── docs/
 │   └── images/              # README 截图
 ├── .env.example
@@ -238,7 +236,6 @@ MySQL => root@127.0.0.1:3306/plus_papay
 后台一共五个标签页：
 
 - **任务管理**：手动创建批量任务、看任务流水、Token 摘要、状态徽章、删除
-- **CDK 管理**：批量生成、导入、导出、删除、出货
 - **资产池**：手机号 / 银行卡 / 临时邮箱池、批量导入、状态切换
 - **系统配置**：DB 连接、ADMIN 密码修改、代理列表、邮箱通道、并发上限、超时阈值
 - **运行日志**：实时滚动日志，按 jobKey 过滤，支持手动清空
@@ -254,8 +251,6 @@ MySQL => root@127.0.0.1:3306/plus_papay
 
 | 用途        | Method + Path                            | 鉴权     |
 | --------- | ---------------------------------------- | ------ |
-| 用户兑换 CDK  | `POST /api/redeem-product`               | 无      |
-| 查询 CDK 状态 | `GET /api/cdk/query?cdk=...`             | 无      |
 | 后台登录      | `POST /api/admin/login`                  | 密码     |
 | 后台数据全量    | `GET /api/admin/data`                    | Bearer |
 | 创建批量任务    | `POST /api/admin/products/generate`      | Bearer |

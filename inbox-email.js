@@ -11,15 +11,32 @@ function trimBaseUrl(raw) {
  * 在 inbox.jzqkwl.com (cloudflare_temp_email) 上新建一个临时邮箱地址
  * 返回 { jwt, address, password }
  */
-async function createAddress({ baseUrl, name = '', domain = '', enablePrefix } = {}) {
-    const url = `${trimBaseUrl(baseUrl)}/api/new_address`;
-    const body = {};
-    if (name) body.name = String(name);
+async function createAddress({
+    baseUrl,
+    adminPassword = '',
+    name = 'admin',
+    domain = '',
+    enablePrefix,
+    enableRandomSubdomain
+} = {}) {
+    // Cloudflare Temp Email 禁用匿名 /api/new_address 后，必须走管理员接口。
+    // 与 chatgpt2api 的 CloudflareTempMailProvider 保持一致：
+    // POST /admin/new_address + x-admin-auth，并在请求体中提交随机二级域名开关。
+    const url = `${trimBaseUrl(baseUrl)}/admin/new_address`;
+    const body = {
+        enablePrefix: typeof enablePrefix === 'boolean' ? enablePrefix : true,
+        name: String(name || 'admin')
+    };
     if (domain) body.domain = String(domain);
-    if (typeof enablePrefix === 'boolean') body.enablePrefix = enablePrefix;
+    if (typeof enableRandomSubdomain === 'boolean') {
+        body.enableRandomSubdomain = enableRandomSubdomain;
+    }
 
     const resp = await axios.post(url, body, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-admin-auth': String(adminPassword || '')
+        },
         timeout: 20000,
         validateStatus: () => true
     });

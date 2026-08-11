@@ -1085,31 +1085,6 @@
             to { opacity: 1; transform: translateY(0) scale(1); }
         }
 
-        /* CDK 复制 */
-        .cdk-copy {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            -webkit-user-select: none;
-            user-select: none;
-            transition: 0.15s;
-            color: var(--text-main);
-        }
-
-        .cdk-copy:hover {
-            color: var(--primary);
-        }
-
-        .cdk-copy i {
-            width: 13px;
-            height: 13px;
-            color: var(--text-dim);
-        }
-
-        .cdk-copy:hover i {
-            color: var(--primary);
-        }
 
         /* 状态徽标 */
         .status-badge {
@@ -1219,6 +1194,10 @@
             background: var(--error);
         }
 
+        .progress-mini-bar.warning {
+            background: var(--warning);
+        }
+
         /* ============ 兼容旧 inline 样式（暗色覆层） ============
          * admin.html 内有大量历史 inline `style="background: rgba(255,255,255,0.03)"` 等
          * 在亮底主题会变成"白上加白"看不见，统一替换为浅灰底
@@ -1325,8 +1304,7 @@
         .stat-value[style*="color: #86efac"] { color: #047857 !important; }     /* 内存 绿 */
         .stat-value[style*="color: #fde68a"] { color: #b45309 !important; }     /* 硬盘 橙 */
         .stat-value[style*="color: #99f6e4"] { color: #0f766e !important; }     /* 运行时间 青 */
-        .stat-value[style*="color: #93c5fd"] { color: #1d4ed8 !important; }     /* 卡密 蓝 */
-        .stat-value[style*="color: #fbbf24"] { color: #b45309 !important; }     /* 未使用 / 待生产 黄 */
+                .stat-value[style*="color: #fbbf24"] { color: #b45309 !important; }     /* 未使用 / 待生产 黄 */
         .stat-value[style*="color: #7dd3fc"] { color: #0369a1 !important; }     /* 手机号 浅蓝 */
         .stat-value[style*="color: #d8b4fe"] { color: #7e22ce !important; }     /* 银行卡 紫 */
         .stat-value[style*="color: #34d399"] { color: #047857 !important; }     /* 成品 绿 */
@@ -1569,10 +1547,6 @@
                 <i data-lucide="badge-check"></i>
                 <span>免费号池</span>
             </div>
-            <div class="nav-item" onclick="switchPage('cdks', this)">
-                <i data-lucide="key"></i>
-                <span>CDK 管理</span>
-            </div>
             <div class="nav-item" onclick="switchPage('products', this)">
                 <i data-lucide="package"></i>
                 <span>成品号池</span>
@@ -1675,33 +1649,9 @@
                     </div>
                     <div id="stat_failed" class="stat-value" style="color: var(--error);">0</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <span class="stat-label">卡密总数</span>
-                        <div class="stat-icon" style="background: rgba(59, 130, 246, 0.1); color: #60a5fa;">
-                            <i data-lucide="tickets"></i>
-                        </div>
-                    </div>
-                    <div id="stat_cdk_total" class="stat-value" style="color: #93c5fd;">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <span class="stat-label">已使用卡密</span>
-                        <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--success);">
-                            <i data-lucide="badge-check"></i>
-                        </div>
-                    </div>
-                    <div id="stat_cdk_used" class="stat-value" style="color: var(--success);">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <span class="stat-label">未使用卡密</span>
-                        <div class="stat-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
-                            <i data-lucide="badge-plus"></i>
-                        </div>
-                    </div>
-                    <div id="stat_cdk_unused" class="stat-value" style="color: #fbbf24;">0</div>
-                </div>
+
+
+
                 <div class="stat-card">
                     <div class="stat-header">
                         <span class="stat-label">手机号数量</span>
@@ -1803,7 +1753,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                                         <th width="50px" style="text-align:center">#</th>
                                         <th width="80px" style="text-align:center">状态</th>
                                         <th width="160px">出口 IP</th>
-                                        <th width="100px" style="text-align:center">延迟</th>
+                                        <th width="190px">OpenAI 登录页</th>
+                                        <th width="130px" style="text-align:center">延迟（IP / OpenAI）</th>
                                         <th>代理 URL</th>
                                     </tr>
                                 </thead>
@@ -1902,6 +1853,26 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                                 cloudflare_temp_email 的 API 后端，结尾不要带 <code>/</code>。
                             </p>
                         </div>
+                        <div class="form-group" style="margin-top: 14px;">
+                            <label>IBOX admin 密码</label>
+                            <input type="password" id="inbox_admin_password" class="asset-input"
+                                   placeholder="留空则保持当前密码" autocomplete="new-password">
+                            <p style="font-size: 13px; color: var(--text-dim); margin-top: 8px;">
+                                使用 IBOX <code>admin</code> 用户创建临时邮箱；当前状态：<strong id="inbox_admin_password_status">未配置</strong>。
+                            </p>
+                        </div>
+                        <div class="toggle-field" style="margin-top: 16px;">
+                            <div class="toggle-label">
+                                <span>启动随机二级域名</span>
+                            </div>
+                            <label class="toggle-control">
+                                <input type="checkbox" id="inbox_enable_random_subdomain" class="toggle-input" checked>
+                                <span class="toggle-switch"></span>
+                            </label>
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px;">
+                            勾选后创建邮箱请求会传递 <code>enableRandomSubdomain: true</code>。
+                        </p>
                         <div class="form-group" style="margin-top: 14px;">
                             <label>临时邮箱域名（单个，可选）</label>
                             <div style="display: flex; align-items: center; gap: 6px;">
@@ -2242,6 +2213,10 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                             <i data-lucide="play"></i>
                             生成免费号
                         </button>
+                        <button type="button" class="btn btn-delete" id="free_account_gen_stop_btn" style="display:none;" onclick="stopFreeAccountGeneration({ useCurrentJob: true })">
+                            <i data-lucide="square"></i>
+                            停止免费号生产
+                        </button>
                         <button class="btn btn-success" onclick="loadFreeAccounts(true)">
                             <i data-lucide="refresh-cw"></i>
                             刷新列表
@@ -2290,102 +2265,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             </div>
         </div>
 
-        <!-- CDK 管理 -->
-        <div id="cdks" class="page-view">
-            <div class="page-header">
-                <h1>CDK 激活码管理</h1>
-                <p>生成并管理用于前台兑换的激活码</p>
-            </div>
-            <div class="panel">
-                <div class="panel-header">
-                    <h2 class="panel-title">激活码列表</h2>
-                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
-                        <button class="btn btn-success" onclick="toggleImportBox('cdk')">
-                            <i data-lucide="upload"></i>
-                            批量导入
-                        </button>
-                        <input type="text" id="cdk_search" class="asset-input" placeholder="搜索激活码 / 卡密"
-                            style="width: 220px;" oninput="handleCdkSearch(this.value)">
-                        <div class="filter-dropdown" data-filter="cdk_generate_type" style="min-width: 110px;">
-                            <button class="filter-trigger" onclick="toggleFilterMenu('cdk_generate_type')">
-                                <span id="current_cdk_type_label">自助</span>
-                                <i data-lucide="chevron-down"></i>
-                            </button>
-                            <div id="filter_menu_cdk_generate_type" class="filter-menu">
-                                <button class="filter-option active" onclick="selectGenerateType('自助')">自助</button>
-                                <button class="filter-option" onclick="selectGenerateType('成品')">成品</button>
-                            </div>
-                        </div>
-                        <input type="number" id="cdk_count" value="1" min="1" max="100" class="asset-input"
-                            style="width: 80px;">
-                        <button class="btn btn-primary" onclick="generateCDKs(this)">
-                            <i data-lucide="sparkles"></i>
-                            生成
-                        </button>
-                    </div>
-                </div>
-                <div id="cdk_import_box" class="import-box">
-                    <div class="import-box-header">
-                        <div class="import-box-title">批量导入激活码</div>
-                    </div>
-                    <div class="import-box-tip">
-                        支持每行一条，或使用逗号、空格分隔。系统会自动去重并忽略空行。
-                    </div>
-                    <textarea id="cdk_import_text" class="import-textarea"
-                        placeholder="ABCD1234EFGH&#10;IJKL5678MNOP&#10;QRST9012UVWX"></textarea>
-                    <div class="import-actions">
-                        <button class="btn btn-success" onclick="importCDKs()">
-                            <i data-lucide="check-check"></i>
-                            解析并导入
-                        </button>
-                    </div>
-                </div>
-                <div class="batch-actions">
-                    <div class="filter-dropdown" data-filter="cdk">
-                        <button class="filter-trigger" onclick="toggleFilterMenu('cdk')"><span>全部状态</span><i
-                                data-lucide="chevron-down"></i></button>
-                        <div class="filter-menu">
-                            <button class="filter-option active"
-                                onclick="selectFilter('cdk', 'all', '全部状态')">全部状态</button>
-                            <button class="filter-option" onclick="selectFilter('cdk', 'unused', '未使用')">未使用</button>
-                            <button class="filter-option" onclick="selectFilter('cdk', 'used', '已使用')">已使用</button>
-                            <button class="filter-option" onclick="selectFilter('cdk', 'unshipped', '未出库')">未出库</button>
-                            <button class="filter-option" onclick="selectFilter('cdk', 'shipped', '已出库')">已出库</button>
-                        </div>
-                    </div>
-                    <button class="btn btn-success" onclick="togglePageSelection('cdk')">
-                        <i data-lucide="check-square"></i>
-                        本页全选/取消
-                    </button>
-                    <button class="btn btn-success" onclick="batchCopyCDKs()">
-                        <i data-lucide="copy"></i>
-                        复制
-                    </button>
-                    <button class="btn btn-success" onclick="batchDeleteCDKs()">
-                        <i data-lucide="trash-2"></i>
-                        删除
-                    </button>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th class="select-header">选择</th>
-                                <th>激活码内容</th>
-                                <th width="120px" style="text-align:center">类型</th>
-                                <th width="120px" style="text-align:center">是否出库</th>
-                                <th width="140px">状态</th>
-                                <th width="180px">使用时间</th>
-                                <th width="100px" style="text-align:center">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cdk_body"></tbody>
-                    </table>
-                </div>
-                <div id="cdk_pagination" class="table-footer"></div>
-            </div>
-        </div>
-
         <!-- 成品号池 -->
         <div id="products" class="page-view">
             <div class="page-header">
@@ -2403,7 +2282,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                         </button>
                     </div>
                 </div>
-                
+
                 <div id="product_gen_progress_container" class="panel" style="display: none; margin-bottom: 24px; background: rgba(255, 255, 255, 0.02); border: 1px dashed rgba(255, 255, 255, 0.1);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                         <span id="product_gen_status" style="font-size: 14px; color: var(--text-main); font-weight: 600;">正在准备生产环境...</span>
@@ -2457,7 +2336,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                             <tr>
                                 <th class="select-header" width="60px">选择</th>
                                 <th>邮箱账号</th>
-                                <th width="150px">使用CDK</th>
                                 <th width="180px">KEY</th>
                                 <th width="200px">生产时间</th>
                                 <th width="100px" style="text-align:center">状态</th>
@@ -2474,7 +2352,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         <div id="logs" class="page-view">
             <div class="page-header">
                 <h1>任务管理</h1>
-                <p>查看与管理数据库中的任务记录（含自助开通与后台成品生产）</p>
+                <p>查看与管理数据库中的任务记录（含后台成品生产和免费号生成）</p>
             </div>
             <div class="panel">
                 <div class="runtime-log-toolbar log-page-toolbar">
@@ -2490,14 +2368,22 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                         <i data-lucide="square"></i>
                         停止成品批量生产
                     </button>
-                    <span class="log-page-toolbar-hint">默认每 3 秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条任务记录。「停止成品批量」仅针对后台批量成品任务；前台自助开通由子进程执行，无法在此强制杀进程，可开维护模式拒绝新单。</span>
+                    <button type="button" class="btn btn-delete" onclick="stopFreeAccountGeneration({})">
+                        <i data-lucide="square"></i>
+                        停止免费号生产
+                    </button>
+                    <button type="button" class="btn btn-delete" onclick="batchDeleteAdminTaskLogs()">
+                        <i data-lucide="trash-2"></i>
+                        批量删除选中任务
+                    </button>
+                    <span class="log-page-toolbar-hint">默认每 3 秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条任务记录，也可勾选后批量删除。「停止成品批量」仅针对后台批量成品任务；前台自助开通由子进程执行，无法在此强制杀进程，可开维护模式拒绝新单。</span>
                 </div>
                 <div class="table-container">
                     <table>
                         <thead>
                             <tr>
+                                <th class="select-header" width="60px"><input type="checkbox" title="选择当前页任务" onclick="togglePageSelection('log')"></th>
                                 <th>执行时间</th>
-                                <th>激活码</th>
                                 <th width="100px" style="text-align:center">类型</th>
                                 <th>Token 摘要</th>
                                 <th>任务信息</th>
@@ -2546,34 +2432,34 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
     <script>
         const TOKEN_KEY = 'plus_admin_token';
         const statusMap = {
-            success: { class: 'status-success' },
-            failed: { class: 'status-failed' },
-            running: { class: 'status-running' },
-            card_invalid: { class: 'status-warning' }
+            success: { class: 'status-success', label: '成功' },
+            failed: { class: 'status-failed', label: '失败' },
+            running: { class: 'status-running', label: '进行中' },
+            maintenance: { class: 'status-warning', label: '已停止' },
+            stopped: { class: 'status-warning', label: '已停止' },
+            cancelled: { class: 'status-warning', label: '已取消' },
+            card_invalid: { class: 'status-warning', label: '卡无效' }
         };
 
         let phonePool = [];
         let cardPool = [];
-        let cdkPool = [];
         let productPool = [];
         let poolEmailsList = [];
         let freeAccountsList = [];
         const selectedItems = {
             phone_pool: new Set(),
             card_pool: new Set(),
-            cdk: new Set(),
             product: new Set(),
             pool_email: new Set(),
-            free_account: new Set()
+            free_account: new Set(),
+            log: new Set()
         };
         const tableFilters = {
             phone_pool: 'all',
             card_pool: 'all',
-            cdk: 'all',
             product: 'all'
         };
         const tableSearch = {
-            cdk: '',
             product: ''
         };
         let adminRefreshTimer = null;
@@ -2588,7 +2474,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         const paginationState = {
             phone_pool: { page: 1, pageSize: 10 },
             card_pool: { page: 1, pageSize: 10 },
-            cdk: { page: 1, pageSize: 12 },
             product: { page: 1, pageSize: 12 },
             pool_email: { page: 1, pageSize: 9999 },
             free_account: { page: 1, pageSize: 9999 },
@@ -2603,9 +2488,13 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         /** 后台定时 loadData（含任务管理列表）；为便于阅读可暂停 */
         let adminDataRefreshPaused = false;
         let adminDataRefreshTimer = null;
+        // Do not overwrite fields while the config form is being edited.
+        let configFormDirty = false;
 
         /** 当前成品批量生产 WebSocket 对应的 jobKey，用于「停止生产」 */
         window.__adminProductGenJobKey = '';
+        /** 当前免费号生产 WebSocket 对应的 jobKey，用于「停止免费号生产」 */
+        window.__adminFreeAccountGenJobKey = '';
 
         function formatRuntimeLogTs(ts) {
             try {
@@ -2829,6 +2718,54 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             }
         }
 
+        async function stopFreeAccountGeneration(opts = {}) {
+            const useCurrent = Boolean(opts.useCurrentJob);
+            const jobKey = useCurrent ? String(window.__adminFreeAccountGenJobKey || '').trim() : '';
+            try {
+                const res = await authFetch('/api/admin/free-accounts/generate-stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(jobKey ? { jobKey } : {})
+                });
+                const raw = await res.text();
+                let data = {};
+                if (raw) {
+                    try {
+                        data = JSON.parse(raw);
+                    } catch (_) {
+                        /* 非 JSON（如 404 返回 HTML） */
+                    }
+                }
+                if (!res.ok) {
+                    const hint = res.status === 404
+                        ? '接口不存在，请部署含「停止免费号生产」的后端并重启 Node 服务'
+                        : '';
+                    throw new Error(data.message || hint || `请求失败（${res.status}）`);
+                }
+                if (data && data.success === false) {
+                    throw new Error(data.message || '操作失败');
+                }
+                const stopped = Number(data.stopped || 0);
+                if (stopped > 0 && jobKey) {
+                    const statusText = document.getElementById('free_account_gen_status');
+                    if (statusText) {
+                        statusText.innerText = '已发送停止指令，当前免费号条次将尽快终止...';
+                    }
+                }
+                showMessage(data.message || '操作完成', stopped > 0 ? 'success' : 'warning');
+            } catch (error) {
+                showMessage(error.message || '停止免费号生产失败', 'error');
+            }
+            lucide.createIcons();
+        }
+
+        function setFreeAccountGenStopVisible(visible) {
+            const stopBtn = document.getElementById('free_account_gen_stop_btn');
+            if (stopBtn) {
+                stopBtn.style.display = visible ? 'inline-flex' : 'none';
+            }
+        }
+
         async function clearRuntimeLogs() {
             const ok = await showAdminConfirm(
                 '确定清空当前内存中的运行日志？（不影响任务管理数据库表）',
@@ -2937,8 +2874,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         }
 
         function renderStatus(status) {
-            const cfg = statusMap[status] || { class: '' };
-            return `<span class="status-badge ${cfg.class}">${String(status || '').toUpperCase()}</span>`;
+            const key = String(status || '').trim().toLowerCase();
+            const cfg = statusMap[key] || { class: 'status-warning', label: key || '未知' };
+            return `<span class="status-badge ${cfg.class}">${escapeHtml(cfg.label)}</span>`;
         }
 
         function showMessage(content, type = 'success') {
@@ -3030,35 +2968,16 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             const filter = tableFilters[type] || 'all';
             const source = type === 'phone_pool' ? phonePool
                 : type === 'card_pool' ? cardPool
-                    : type === 'cdk' ? cdkPool
                         : type === 'pool_email' ? poolEmailsList
                             : type === 'free_account' ? freeAccountsList
-                                : productPool;
+                                : type === 'log' ? (window.__adminLogs || [])
+                                    : productPool;
             let result = source;
             if (type === 'phone_pool' || type === 'card_pool') {
                 result = filter === 'all'
                     ? source
                     : source.filter((item) => filter === 'normal' ? isAssetActive(item) : !isAssetActive(item));
                 return result;
-            }
-            if (type === 'cdk') {
-                if (filter === 'used') {
-                    result = source.filter((item) => (typeof item === 'string' ? 'unused' : (item.status || 'unused')) === 'used');
-                } else if (filter === 'unused') {
-                    result = source.filter((item) => (typeof item === 'string' ? 'unused' : (item.status || 'unused')) !== 'used');
-                } else if (filter === 'shipped') {
-                    result = source.filter((item) => typeof item !== 'string' && Boolean(item.shipped));
-                } else if (filter === 'unshipped') {
-                    result = source.filter((item) => typeof item === 'string' || !item.shipped);
-                }
-
-                const keyword = String(tableSearch.cdk || '').trim().toUpperCase();
-                if (keyword) {
-                    result = result.filter((item) => {
-                        const code = typeof item === 'string' ? item : (item.code || '');
-                        return String(code).toUpperCase().includes(keyword);
-                    });
-                }
             }
             if (type === 'product') {
                 if (filter === 'today') {
@@ -3095,22 +3014,16 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             paginationState[type].page = 1;
             if (type === 'phone_pool') renderPhoneTable();
             if (type === 'card_pool') renderCardTable();
-            if (type === 'cdk') renderCDKTable();
             if (type === 'product') renderProductTable();
             if (type === 'pool_email') renderPoolEmailsTable();
             if (type === 'free_account') renderFreeAccountsTable();
+            if (type === 'log') renderLogTable(window.__adminLogs || []);
         }
 
         function handleProductSearch(value) {
             tableSearch.product = String(value || '');
             paginationState.product.page = 1;
             renderProductTable();
-        }
-
-        function handleCdkSearch(value) {
-            tableSearch.cdk = String(value || '');
-            paginationState.cdk.page = 1;
-            renderCDKTable();
         }
 
         function closeFilterMenus() {
@@ -3146,17 +3059,16 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             paginationState[stateKey].page = nextPage;
             if (stateKey === 'phone_pool') renderPhoneTable();
             if (stateKey === 'card_pool') renderCardTable();
-            if (stateKey === 'cdk') renderCDKTable();
             if (stateKey === 'log') renderLogTable(window.__adminLogs || []);
         }
 
         function getItemKey(type, item) {
             if (type === 'phone_pool') return item.phone || '';
             if (type === 'card_pool') return item.number || '';
-            if (type === 'cdk') return typeof item === 'string' ? item : (item.code || '');
             if (type === 'product') return String(item.id || '');
             if (type === 'pool_email') return String(item.id || '');
             if (type === 'free_account') return String(item.id || '');
+            if (type === 'log') return String(item.id || '');
             return '';
         }
 
@@ -3182,7 +3094,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             });
             if (type === 'phone_pool') renderPhoneTable();
             if (type === 'card_pool') renderCardTable();
-            if (type === 'cdk') renderCDKTable();
             if (type === 'product') renderProductTable();
             if (type === 'pool_email') renderPoolEmailsTable();
             if (type === 'free_account') renderFreeAccountsTable();
@@ -3569,6 +3480,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             const bar = document.getElementById('free_account_gen_bar');
             const percentText = document.getElementById('free_account_gen_percent');
             const statusText = document.getElementById('free_account_gen_status');
+            window.__adminFreeAccountGenJobKey = '';
+            setFreeAccountGenStopVisible(false);
             if (!container || !bar || !percentText || !statusText || !btn) {
                 return;
             }
@@ -3590,6 +3503,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 if (socket) {
                     try { socket.close(); } catch (_) { }
                 }
+                window.__adminFreeAccountGenJobKey = '';
+                setFreeAccountGenStopVisible(false);
                 statusText.innerText = message;
                 bar.style.background = ok ? 'var(--success)' : 'var(--danger)';
                 btn.disabled = false;
@@ -3609,6 +3524,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     throw new Error(data.message || '免费号生成启动失败');
                 }
 
+                window.__adminFreeAccountGenJobKey = String(data.jobKey);
+                setFreeAccountGenStopVisible(true);
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 socket = new WebSocket(`${protocol}//${window.location.host}`);
                 socket.onopen = () => {
@@ -3623,14 +3540,16 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     if (payload.message) statusText.innerText = payload.message;
                     if (payload.status === 'success') {
                         await finish(payload.message || `成功生成 ${count} 个免费号`, true);
-                    } else if (payload.status === 'failed') {
-                        await finish(payload.message || '免费号生成失败', false);
+                    } else if (payload.status === 'failed' || payload.status === 'maintenance') {
+                        await finish(payload.message || '免费号生产已停止', false);
                     }
                 };
                 socket.onerror = () => {
                     statusText.innerText = '连接异常，可在任务管理查看进度';
                 };
             } catch (error) {
+                window.__adminFreeAccountGenJobKey = '';
+                setFreeAccountGenStopVisible(false);
                 container.style.display = 'none';
                 btn.disabled = false;
                 btn.innerHTML = originalContent;
@@ -3691,8 +3610,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     if (payload.message) statusText.innerText = payload.message;
                     if (payload.status === 'success') {
                         await finish(payload.message || `${email} Token 补充成功`, true);
-                    } else if (payload.status === 'failed') {
-                        await finish(payload.message || `${email} Token 补充失败`, false);
+                    } else if (payload.status === 'failed' || payload.status === 'maintenance') {
+                        await finish(payload.message || `${email} Token 补充已停止`, false);
                     }
                 };
                 socket.onerror = () => {
@@ -3819,9 +3738,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 document.getElementById('stat_total').innerText = data.stats.total;
                 document.getElementById('stat_success').innerText = data.stats.success;
                 document.getElementById('stat_failed').innerText = data.stats.failed;
-                document.getElementById('stat_cdk_total').innerText = data.stats.cdk_total || 0;
-                document.getElementById('stat_cdk_used').innerText = data.stats.cdk_used || 0;
-                document.getElementById('stat_cdk_unused').innerText = data.stats.cdk_unused || 0;
                 document.getElementById('stat_phone_total').innerText = (data.config.phone_pool || []).length;
                 document.getElementById('stat_card_total').innerText = (data.config.card_pool || []).length;
                 document.getElementById('stat_product_total').innerText = data.stats.product_total || 0;
@@ -3838,7 +3754,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     resumeBtn.title = String(data.stats.product_resume_message || '');
                 }
 
-                if (isInitial) {
+                const shouldHydrateConfig = isInitial || !configFormDirty;
+                if (shouldHydrateConfig) {
                     document.getElementById('proxy').value = data.config.proxy || '';
                     document.getElementById('max_concurrent_activations').value = data.config.max_concurrent_activations || 1;
                     document.getElementById('max_background_concurrent').value = data.config.max_background_concurrent || 1;
@@ -3851,58 +3768,63 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 }
 
                 window.__adminRuntime = data.runtime || { active_activation_jobs: 0 };
-                lastMaintenanceModeValue = Boolean(data.config.maintenance_mode);
-                updateMaintenanceModeUI(data.config, window.__adminRuntime);
+                if (shouldHydrateConfig && !maintenanceModeSaving) {
+                    lastMaintenanceModeValue = Boolean(data.config.maintenance_mode);
+                    updateMaintenanceModeUI(data.config, window.__adminRuntime);
+                }
 
-                const src = ['random', 'pool', 'inbox'].includes(String(data.config.email_source))
-                    ? String(data.config.email_source)
-                    : (data.config.pool_email_enabled ? 'pool' : 'random');
-                const radioRandom = document.getElementById('email_source_random');
-                const radioPool = document.getElementById('email_source_pool');
-                const radioInbox = document.getElementById('email_source_inbox');
-                if (radioRandom && radioPool && radioInbox) {
-                    radioRandom.checked = src === 'random';
-                    radioPool.checked = src === 'pool';
-                    radioInbox.checked = src === 'inbox';
-                    syncEmailSourceUI();
-                }
-                const poolEmailHostEl = document.getElementById('pool_email_imap_host');
-                if (poolEmailHostEl) {
-                    poolEmailHostEl.value = data.config.pool_email_imap_host || 'outlook.office365.com';
-                }
-                const poolEmailJunkEl = document.getElementById('pool_email_include_junk');
-                if (poolEmailJunkEl) {
-                    poolEmailJunkEl.checked = data.config.pool_email_include_junk !== false;
-                }
-                const randomDomainEl = document.getElementById('random_email_domain');
-                if (randomDomainEl) {
-                    randomDomainEl.value = data.config.random_email_domain || 'chiyiyi.cloud';
-                }
-                const inboxBaseEl = document.getElementById('inbox_api_base');
-                if (inboxBaseEl) {
-                    inboxBaseEl.value = data.config.inbox_api_base || 'https://temp-email-api.jzqkwl.com';
-                }
-                const inboxDomainEl = document.getElementById('inbox_email_domain');
-                if (inboxDomainEl) {
-                    inboxDomainEl.value = data.config.inbox_email_domain || '';
-                }
-                const inboxDomainsEl = document.getElementById('inbox_email_domains');
-                if (inboxDomainsEl) {
-                    const list = data.config.inbox_email_domains;
-                    if (Array.isArray(list)) {
-                        inboxDomainsEl.value = list.join('\n');
-                    } else {
-                        inboxDomainsEl.value = String(list || '').replace(/[,;]/g, '\n');
+                if (shouldHydrateConfig) {
+                    const src = ['random', 'pool', 'inbox'].includes(String(data.config.email_source))
+                        ? String(data.config.email_source)
+                        : (data.config.pool_email_enabled ? 'pool' : 'random');
+                    const radioRandom = document.getElementById('email_source_random');
+                    const radioPool = document.getElementById('email_source_pool');
+                    const radioInbox = document.getElementById('email_source_inbox');
+                    if (radioRandom && radioPool && radioInbox) {
+                        radioRandom.checked = src === 'random';
+                        radioPool.checked = src === 'pool';
+                        radioInbox.checked = src === 'inbox';
+                        syncEmailSourceUI();
                     }
+                    const poolEmailHostEl = document.getElementById('pool_email_imap_host');
+                    if (poolEmailHostEl) {
+                        poolEmailHostEl.value = data.config.pool_email_imap_host || 'outlook.office365.com';
+                    }
+                    const poolEmailJunkEl = document.getElementById('pool_email_include_junk');
+                    if (poolEmailJunkEl) {
+                        poolEmailJunkEl.checked = data.config.pool_email_include_junk !== false;
+                    }
+                    const randomDomainEl = document.getElementById('random_email_domain');
+                    if (randomDomainEl) {
+                        randomDomainEl.value = data.config.random_email_domain || 'chiyiyi.cloud';
+                    }
+                    const inboxBaseEl = document.getElementById('inbox_api_base');
+                    if (inboxBaseEl) {
+                        inboxBaseEl.value = data.config.inbox_api_base || 'https://temp-email-api.jzqkwl.com';
+                    }
+                    const inboxDomainEl = document.getElementById('inbox_email_domain');
+                    if (inboxDomainEl) {
+                        inboxDomainEl.value = data.config.inbox_email_domain || '';
+                    }
+                    const inboxDomainsEl = document.getElementById('inbox_email_domains');
+                    if (inboxDomainsEl) {
+                        const list = data.config.inbox_email_domains;
+                        if (Array.isArray(list)) {
+                            inboxDomainsEl.value = list.join('\n');
+                        } else {
+                            inboxDomainsEl.value = String(list || '').replace(/[,;]/g, '\n');
+                        }
+                    }
+
+                }
+                const inboxPasswordStatusEl = document.getElementById('inbox_admin_password_status');
+                if (inboxPasswordStatusEl) {
+                    inboxPasswordStatusEl.textContent = data.config.inbox_admin_password_configured ? '已配置（留空保存时保持不变）' : '未配置';
                 }
 
                 window.__adminLogs = data.logs || [];
+                pruneSelection('log', window.__adminLogs);
                 renderLogTable(window.__adminLogs);
-
-                const cdkRes = await authFetch('/api/admin/cdks');
-                cdkPool = await cdkRes.json();
-                pruneSelection('cdk', cdkPool);
-                renderCDKTable();
 
                 const productRes = await authFetch('/api/admin/products');
                 productPool = await productRes.json();
@@ -3945,24 +3867,26 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         async function batchTestProxies() {
             const ta = document.getElementById('proxy');
             const text = String(ta?.value || '').trim();
-            const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-            if (!lines.length) {
-                showMessage('请先填入至少一条代理 URL', 'warning');
-                return;
-            }
+            const configuredLines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+            // 没有配置代理时，用空值通知后端直接走本机出口；不再阻断测试。
+            const usingLocalExit = configuredLines.length === 0;
+            const lines = usingLocalExit ? [''] : configuredLines;
 
             const panel = document.getElementById('proxy_test_panel');
             const tbody = document.getElementById('proxy_test_body');
             const summary = document.getElementById('proxy_test_summary');
             panel.style.display = 'block';
-            summary.textContent = `正在并发测试 ${lines.length} 条代理...`;
+            summary.textContent = usingLocalExit
+                ? '正在测试本地出口：出口 IP + OpenAI 登录页...'
+                : `正在测试 ${lines.length} 条代理：出口 IP + OpenAI 登录页...`;
             tbody.innerHTML = lines.map((line, i) => `
                 <tr id="proxy_test_row_${i}">
                     <td style="text-align:center;color:var(--text-dim);">${i + 1}</td>
                     <td style="text-align:center;"><span class="status-badge" style="opacity:.6;">测试中</span></td>
                     <td>—</td>
+                    <td style="font-size:12px;color:var(--text-dim);">检测中...</td>
                     <td style="text-align:center;">—</td>
-                    <td><code style="font-size:12px;">${escapeHtml(line)}</code></td>
+                    <td><code style="font-size:12px;">${escapeHtml(line || '本地出口（未配置代理）')}</code></td>
                 </tr>
             `).join('');
             lucide.createIcons();
@@ -3988,20 +3912,34 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 }
                 const results = Array.isArray(data.results) ? data.results : [];
                 let okCount = 0;
+                let networkOnlyCount = 0;
                 results.forEach((r, i) => {
                     const row = document.getElementById(`proxy_test_row_${i}`);
                     if (!row) return;
-                    const statusBadge = r.ok
-                        ? '<span class="status-badge status-success">通过</span>'
-                        : '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">失败</span>';
-                    if (r.ok) okCount += 1;
-                    const ip = r.ok ? `<code>${escapeHtml(r.ip || '-')}</code>` : `<span style="color:#f87171; font-size:12px;">${escapeHtml(r.error || '失败')}</span>`;
-                    const lat = r.ok ? `${r.latencyMs}ms` : '—';
+                    const openai = r.openai || {};
+                    const passed = Boolean(r.ok && openai.ok);
+                    const statusBadge = passed
+                        ? '<span class="status-badge status-success">可用于注册</span>'
+                        : r.ok
+                            ? '<span class="status-badge" style="background:rgba(245,158,11,0.12);color:#fbbf24;">OpenAI 不通</span>'
+                            : '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">基础网络失败</span>';
+                    if (passed) okCount += 1;
+                    else if (r.ok) networkOnlyCount += 1;
+                    const ip = r.ok
+                        ? `<code>${escapeHtml(r.ip || '-')}</code>`
+                        : `<span style="color:#f87171; font-size:12px;">${escapeHtml(r.error || '失败')}</span>`;
+                    const openaiCell = openai.ok
+                        ? `<span style="color:var(--success);font-size:12px;">${escapeHtml(openai.message || `可访问${openai.status ? ` (HTTP ${openai.status})` : ''}`)}</span>`
+                        : `<span style="color:#f87171;font-size:12px;">${escapeHtml(openai.error || '未通过')}</span>`;
+                    const lat = r.ok
+                        ? `${r.latencyMs}ms / ${openai.latencyMs != null ? `${openai.latencyMs}ms` : '—'}`
+                        : '—';
                     row.children[1].innerHTML = statusBadge;
                     row.children[2].innerHTML = ip;
-                    row.children[3].textContent = lat;
+                    row.children[3].innerHTML = openaiCell;
+                    row.children[4].textContent = lat;
                 });
-                summary.textContent = `测试完成 · 通过 ${okCount} / 共 ${results.length}`;
+                summary.textContent = `测试完成${usingLocalExit ? '（本地出口）' : ''} · 可用于注册 ${okCount} / 共 ${results.length}${networkOnlyCount ? `；${networkOnlyCount} 条仅基础网络可用，OpenAI 登录页不可用` : ''}`;
                 lucide.createIcons();
             } catch (error) {
                 summary.textContent = `测试失败: ${error.message || ''}`;
@@ -4055,6 +3993,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 pool_email_include_junk: Boolean(document.getElementById('pool_email_include_junk')?.checked),
                 random_email_domain: normalizeRandomDomain(document.getElementById('random_email_domain')?.value),
                 inbox_api_base: String(document.getElementById('inbox_api_base')?.value || 'https://temp-email-api.jzqkwl.com').trim().replace(/\/+$/, '') || 'https://temp-email-api.jzqkwl.com',
+                inbox_admin_password: String(document.getElementById('inbox_admin_password')?.value || ''),
+                inbox_enable_random_subdomain: Boolean(document.getElementById('inbox_enable_random_subdomain')?.checked),
                 inbox_email_domain: String(document.getElementById('inbox_email_domain')?.value || '').trim().replace(/^@/, ''),
                 inbox_email_domains: String(document.getElementById('inbox_email_domains')?.value || '')
                     .split(/[\n,;\s]+/)
@@ -4093,13 +4033,15 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 }
                 lastMaintenanceModeValue = nextValue;
                 showMessage(data.message, 'success');
+                configFormDirty = false;
+                const inboxPasswordEl = document.getElementById('inbox_admin_password');
+                if (inboxPasswordEl) inboxPasswordEl.value = '';
                 await loadData(true);
             } catch (error) {
                 if (checkbox) {
                     checkbox.checked = lastMaintenanceModeValue;
                 }
                 showMessage(error.message || '维护模式保存失败', 'error');
-                await loadData(true);
             } finally {
                 maintenanceModeSaving = false;
                 updateMaintenanceModeUI(
@@ -4111,107 +4053,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     window.__adminRuntime
                 );
             }
-        }
-
-        function renderCDKTable() {
-            const pageData = getPageItems(getFilteredItems('cdk'), 'cdk');
-            document.getElementById('cdk_body').innerHTML = pageData.items.map((cdk) => {
-                const code = typeof cdk === 'string' ? cdk : (cdk.code || '');
-                const status = typeof cdk === 'string' ? 'unused' : (cdk.status || 'unused');
-                const type = typeof cdk === 'string' ? '自助' : (cdk.type || '自助');
-                const shipped = typeof cdk === 'string' ? false : Boolean(cdk.shipped);
-                const usedAt = typeof cdk === 'string' ? null : cdk.used_at;
-                const createdAt = typeof cdk === 'string' ? null : cdk.created_at;
-
-                return `
-                <tr>
-                    <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? 'checked' : ''} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
-                    <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
-                    <td style="text-align:center"><span class="status-badge ${type === '成品' ? 'status-success' : 'status-running'}" style="background: ${type === '成品' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)'}; color: ${type === '成品' ? '#34d399' : '#818cf8'}">${type}</span></td>
-                    <td style="text-align:center"><span class="readonly-switch ${shipped ? 'active' : ''}" title="${shipped ? '已出库' : '未出库'}"></span></td>
-                    <td>${status === 'processing'
-                        ? '<span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">开通中</span>'
-                        : (status === 'used'
-                            ? '<span class="status-badge status-success">已使用</span>'
-                            : '<span class="status-badge status-running">未使用</span>')}</td>
-                    <td>${usedAt || '-'}</td>
-                    <td style="text-align:center">
-                        <button class="btn-delete" onclick="deleteCDK('${code}')">
-                            <i data-lucide="trash-2"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-            }).join('');
-            renderPagination('cdk_pagination', 'cdk', pageData.total);
-            lucide.createIcons();
-        }
-
-        async function copyCDK(cdk) {
-            try {
-                await copyText(cdk);
-                await markCDKShipped(cdk);
-                showMessage(`已复制激活码: ${cdk}`, 'success');
-            } catch (error) {
-                showMessage('复制失败，请手动复制', 'error');
-            }
-        }
-
-        async function copyText(text) {
-            if (navigator.clipboard && window.isSecureContext) {
-                await navigator.clipboard.writeText(text);
-                return;
-            }
-            const input = document.createElement('textarea');
-            input.value = text;
-            document.body.appendChild(input);
-            input.select();
-            document.execCommand('copy');
-            document.body.removeChild(input);
-        }
-
-        async function markCDKShipped(cdk) {
-            const res = await authFetch(`/api/admin/cdks/${encodeURIComponent(cdk)}/ship`, { method: 'POST' });
-            const data = await res.json();
-            if (!res.ok || !data.success) {
-                throw new Error(data.message || '标记出库失败');
-            }
-            const item = cdkPool.find((entry) => (typeof entry === 'string' ? entry : entry.code) === cdk);
-            if (item && typeof item !== 'string') {
-                item.shipped = true;
-            }
-            renderCDKTable();
-        }
-
-        async function batchCopyCDKs() {
-            const codes = Array.from(selectedItems.cdk);
-            if (codes.length === 0) {
-                showMessage('请选择要复制的 CDK', 'warning');
-                return;
-            }
-
-            try {
-                await copyText(codes.join('\n'));
-                await Promise.all(codes.map((code) => markCDKShipped(code)));
-                showMessage(`已复制 ${codes.length} 个 CDK，并标记出库`, 'success');
-            } catch (error) {
-                showMessage(error.message || '批量复制失败', 'error');
-            }
-        }
-
-        async function batchDeleteCDKs() {
-            const codes = Array.from(selectedItems.cdk);
-            if (codes.length === 0) {
-                showMessage('请选择要删除的 CDK', 'warning');
-                return;
-            }
-            const ok = await showAdminConfirm(`确定删除选中的 ${codes.length} 个 CDK ?`, '删除 CDK');
-            if (!ok) {
-                return;
-            }
-            await Promise.all(codes.map((code) => authFetch(`/api/admin/cdks/${encodeURIComponent(code)}`, { method: 'DELETE' })));
-            selectedItems.cdk.clear();
-            await loadData();
         }
 
         async function batchDeletePhones() {
@@ -4246,25 +4087,69 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
 
         function renderLogTable(logs) {
             const pageData = getPageItems(logs, 'log');
-            document.getElementById('log_body').innerHTML = pageData.items.map((l) => `
+            document.getElementById('log_body').innerHTML = pageData.items.map((l) => {
+                const type = String(l.type || '系统任务');
+                const typeClass = type === '成品生产'
+                    ? 'status-success'
+                    : type === '免费号生成'
+                        ? 'status-running'
+                        : 'status-warning';
+                const status = String(l.status || '').toLowerCase();
+                const progressClass = status === 'success'
+                    ? 'success'
+                    : ['failed'].includes(status)
+                        ? 'failed'
+                        : ['maintenance', 'stopped', 'cancelled', 'card_invalid'].includes(status)
+                            ? 'warning'
+                            : '';
+                return `
                 <tr>
-                    <td>${l.time}</td>
-                    <td><code>${l.cdk || '-'}</code></td>
-                    <td style="text-align:center"><span class="status-badge ${l.type === '成品' ? 'status-success' : 'status-running'}" style="background: ${l.type === '成品' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)'}; color: ${l.type === '成品' ? '#34d399' : '#818cf8'}; padding: 4px 10px; font-size: 11px;">${l.type || '自助'}</span></td>
-                    <td><code>${l.token}</code></td>
-                    <td>${l.message || '-'}</td>
+                    <td class="select-cell"><input type="checkbox" ${selectedItems.log.has(String(l.id)) ? 'checked' : ''} onchange="toggleSelection('log', ${JSON.stringify(String(l.id))}, this.checked)"></td>
+                    <td>${escapeHtml(l.time || '-')}</td>
+                    <td style="text-align:center"><span class="status-badge ${typeClass}">${escapeHtml(type)}</span></td>
+                    <td><code>${escapeHtml(l.token || '')}</code></td>
+                    <td>${escapeHtml(l.message || '-')}</td>
                     <td>
-                        <div style="font-size: 12px; margin-bottom: 2px;">${l.progress}%</div>
+                        <div style="font-size: 12px; margin-bottom: 2px;">${Number(l.progress || 0)}%</div>
                         <div class="progress-mini-track">
-                            <div class="progress-mini-bar ${l.status}" style="width: ${l.progress}%"></div>
+                            <div class="progress-mini-bar ${progressClass}" style="width: ${Math.max(0, Math.min(100, Number(l.progress || 0)))}%"></div>
                         </div>
                     </td>
-                    <td>${renderStatus(l.status)}</td>
+                    <td>${renderStatus(status)}</td>
                     <td style="text-align:center"><button type="button" class="btn-delete" title="删除此任务记录" onclick='deleteAdminTaskLog(${JSON.stringify(l.id)})'><i data-lucide="trash-2"></i></button></td>
                 </tr>
-            `).join('');
+            `;
+            }).join('');
             renderPagination('log_pagination', 'log', pageData.total);
             lucide.createIcons();
+        }
+
+        async function batchDeleteAdminTaskLogs() {
+            const jobKeys = Array.from(selectedItems.log);
+            if (jobKeys.length === 0) {
+                showMessage('请选择要删除的任务', 'warning');
+                return;
+            }
+            const ok = await showAdminConfirm(`确定删除选中的 ${jobKeys.length} 条任务记录？仅删除数据库记录，不会强制终止正在运行的子进程。`, '批量删除任务');
+            if (!ok) {
+                return;
+            }
+            try {
+                const res = await authFetch('/api/admin/task-logs/bulk-delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobKeys })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || '批量删除失败');
+                }
+                selectedItems.log.clear();
+                showMessage(data.message || `已删除 ${jobKeys.length} 条任务记录`, 'success');
+                await loadData();
+            } catch (e) {
+                showMessage(e.message || '批量删除失败', 'error');
+            }
         }
 
         async function deleteAdminTaskLog(jobKey) {
@@ -4297,53 +4182,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             }
             lucide.createIcons();
         }
-        let currentGenerateType = '自助';
-        function selectGenerateType(type) {
-            currentGenerateType = type;
-            const dropdown = document.querySelector('.filter-dropdown[data-filter="cdk_generate_type"]');
-            dropdown.querySelector('span').innerText = type;
-            dropdown.querySelectorAll('.filter-option').forEach(item => {
-                item.classList.toggle('active', item.innerText === type);
-            });
-            closeFilterMenus();
-        }
-
-        async function generateCDKs(btn) {
-            const count = parseInt(document.getElementById('cdk_count').value, 10) || 1;
-            const type = currentGenerateType;
-            const original = btn.innerHTML;
-            btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> 生成中...';
-            lucide.createIcons();
-
-            try {
-                const res = await authFetch('/api/admin/cdks/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ count, type })
-                });
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    throw new Error(data.message || '生成失败');
-                }
-                showMessage(data.message || '生成成功', 'success');
-                await loadData();
-            } catch (error) {
-                showMessage(error.message || '生成失败', 'error');
-            } finally {
-                btn.innerHTML = original;
-                lucide.createIcons();
-            }
-        }
-
-        async function deleteCDK(cdk) {
-            const ok = await showAdminConfirm(`确定删除 CDK: ${cdk} ?`, '删除 CDK');
-            if (!ok) {
-                return;
-            }
-            await authFetch(`/api/admin/cdks/${cdk}`, { method: 'DELETE' });
-            await loadData();
-        }
-
         function renderPhoneTable() {
             const pageData = getPageItems(getFilteredItems('phone_pool'), 'phone_pool');
             document.getElementById('phone_pool_body').innerHTML = pageData.items.map((item, index) => {
@@ -4407,13 +4245,12 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
 
         function getImportBoxId(type) {
             if (type === 'phone_pool') return 'phone_import_box';
-            if (type === 'card_pool') return 'card_import_box';
-            return 'cdk_import_box';
+            return 'card_import_box';
         }
 
         function toggleImportBox(type) {
             const currentBox = document.getElementById(getImportBoxId(type));
-            ['phone_pool', 'card_pool', 'cdk'].forEach((key) => {
+            ['phone_pool', 'card_pool'].forEach((key) => {
                 if (key !== type) {
                     document.getElementById(getImportBoxId(key))?.classList.remove('active');
                 }
@@ -4514,46 +4351,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             showMessage(`导入完成，新增 ${createdCount} 条，更新 ${updatedCount} 条`, 'success');
         }
 
-        function normalizeCdkImportValues(rawText) {
-            return [...new Set(
-                String(rawText || '')
-                    .split(/[\s,，]+/)
-                    .map((item) => item.trim())
-                    .filter(Boolean)
-            )];
-        }
-
-        async function importCDKs() {
-            const textarea = document.getElementById('cdk_import_text');
-            const codes = normalizeCdkImportValues(textarea?.value);
-
-            if (codes.length === 0) {
-                showMessage('请输入要导入的卡密', 'warning');
-                return;
-            }
-
-            try {
-                const res = await authFetch('/api/admin/cdks/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cdks: codes })
-                });
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    throw new Error(data.message || '导入失败');
-                }
-                textarea.value = '';
-                document.getElementById('cdk_import_box')?.classList.remove('active');
-                await loadData();
-                showMessage(
-                    `导入完成，新增 ${Number(data.insertedCount || 0)} 个，重复 ${Number(data.duplicateCount || 0)} 个`,
-                    'success'
-                );
-            } catch (error) {
-                showMessage(error.message || '导入失败', 'error');
-            }
-        }
-
         function addAssetRow(type) {
             if (type === 'phone_pool') {
                 phonePool.push({ phone: '', key: '', usage_count: 0, is_active: 1, status: 'normal' });
@@ -4586,6 +4383,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     throw new Error(data.message || '保存失败');
                 }
                 showMessage(data.message, 'success');
+                configFormDirty = false;
+                const inboxPasswordEl = document.getElementById('inbox_admin_password');
+                if (inboxPasswordEl) inboxPasswordEl.value = '';
                 await loadData(true);
             } catch (error) {
                 showMessage(error.message || '保存失败', 'error');
@@ -4641,14 +4441,13 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             const pageData = getPageItems(getFilteredItems('product'), 'product');
             const tbody = document.getElementById('product_body');
             if (!tbody) return;
-            
+
             tbody.innerHTML = pageData.items.map((p) => {
                 const isActive = p.status === '正常';
                 return `
                 <tr>
                     <td class="select-cell"><input type="checkbox" ${selectedItems.product.has(String(p.id)) ? 'checked' : ''} onchange="toggleSelection('product', '${p.id}', this.checked)"></td>
                     <td><code>${p.email}</code></td>
-                    <td>${p.claimed_cdk ? `<code>${p.claimed_cdk}</code>` : '<span style="color: var(--text-dim);">-</span>'}</td>
                     <td>
                         ${p.imap_key
                             ? `<a href="https://imap.chiyiyi.cloud/?key=${encodeURIComponent(p.imap_key)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-family: monospace;">${p.imap_key}</a>`
@@ -5051,6 +4850,11 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
 
         document.querySelectorAll('input[name="email_source"]').forEach((el) => {
             el.addEventListener('change', () => syncEmailSourceUI());
+        });
+
+        document.querySelectorAll('#config input, #config select, #config textarea').forEach((el) => {
+            el.addEventListener('input', () => { configFormDirty = true; });
+            el.addEventListener('change', () => { configFormDirty = true; });
         });
 
         bootAdmin();

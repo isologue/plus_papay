@@ -149,6 +149,7 @@ async function run() {
     const DEBUG_HEADFUL = process.env.HEADFUL === '1';
     // 选择真实 Google Chrome：CHROMIUM_CHANNEL=chrome（机器需安装 Google Chrome）
     const CHROMIUM_CHANNEL = normalizeChromiumChannel(process.env.CHROMIUM_CHANNEL);
+    const CHROMIUM_EXECUTABLE_PATH = process.env.CHROMIUM_EXECUTABLE_PATH;
 
     const launchArgs = [
         '--disable-blink-features=AutomationControlled'
@@ -162,6 +163,8 @@ async function run() {
     };
     if (CHROMIUM_CHANNEL) {
         launchOptions.channel = CHROMIUM_CHANNEL; // e.g. 'chrome' / 'msedge'
+    } else if (CHROMIUM_EXECUTABLE_PATH) {
+        launchOptions.executablePath = CHROMIUM_EXECUTABLE_PATH;
     }
     if (DEBUG_HEADFUL) {
         console.log("[Step 0] Starting browser environment" + (CHROMIUM_CHANNEL ? `, channel=${CHROMIUM_CHANNEL}` : "") + ".");

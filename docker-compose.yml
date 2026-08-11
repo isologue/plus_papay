@@ -29,6 +29,12 @@ services:
     restart: unless-stopped
     init: true
     shm_size: 1gb
+    # 容器内没有宿主机 X Server；HEADFUL=1 时用 Xvfb 提供虚拟显示器，
+    # Playwright 仍以有头模式运行并可正常截图。
+    command: >-
+      sh -c 'if [ "$${HEADFUL}" = "1" ]; then
+      Xvfb "$${DISPLAY:-:99}" -screen 0 1280x720x24 -ac -nolisten tcp >/tmp/xvfb.log 2>&1 &
+      fi; exec npm start'
     depends_on:
       mysql:
         condition: service_healthy
@@ -36,6 +42,7 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+      DISPLAY: ${DISPLAY:-:99}
       NODE_ENV: production
       PORT: 3000
       JSON_BODY_LIMIT: ${JSON_BODY_LIMIT:-15mb}
@@ -50,6 +57,7 @@ services:
       ASSET_LOCK_STALE_MS: ${ASSET_LOCK_STALE_MS:-900000}
       HEADFUL: ${HEADFUL:-0}
       CHROMIUM_CHANNEL: ${CHROMIUM_CHANNEL:-}
+      CHROMIUM_EXECUTABLE_PATH: /usr/bin/chromium
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       CHATGPT_TOKEN: ${CHATGPT_TOKEN:-}
       STRIPE_KEY: ${STRIPE_KEY:-}

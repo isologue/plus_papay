@@ -152,10 +152,6 @@ function normalizeCardPool(cardPool) {
         ]);
 }
 
-function normalizeCdks(cdks) {
-    return [...new Set((cdks || []).filter(Boolean).map((item) => String(item).trim()))];
-}
-
 function parseStoredAuthJson(value) {
     const text = String(value || '').trim();
     if (!text) {
@@ -201,7 +197,7 @@ function normalizeSessionAuthValue(authValue) {
 async function initializeBaseData() {
     await runExecute(
         `INSERT INTO app_config (config_key, config_value)
-         VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)
+         VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)
          ON DUPLICATE KEY UPDATE config_value = app_config.config_value;`,
         [
             'proxy', '',
@@ -218,7 +214,9 @@ async function initializeBaseData() {
             'email_source', 'random',
             'inbox_api_base', 'https://temp-email-api.jzqkwl.com',
             'inbox_email_domain', '',
-            'inbox_email_domains', ''
+            'inbox_email_domains', '',
+            'inbox_admin_password', '',
+            'inbox_enable_random_subdomain', '1'
         ]
     );
 }
@@ -271,19 +269,15 @@ async function ensureLegacyColumns() {
     await ensureColumn('card_assets', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
     await ensureColumn('card_assets', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 
-    await ensureColumn('cdk_codes', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
-    await ensureColumn('cdk_codes', 'shipped_at', 'TIMESTAMP NULL DEFAULT NULL');
-    await ensureColumn('cdk_codes', 'used_at', 'TIMESTAMP NULL DEFAULT NULL');
-    await ensureColumn('cdk_codes', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
-    await ensureColumn('cdk_codes', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
-    await ensureColumn('cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '鑷姪'");
 
     await ensureColumn('task_logs', 'token_preview', "VARCHAR(64) NOT NULL DEFAULT ''");
     await ensureColumn('task_logs', 'phone', 'VARCHAR(32) NULL');
-    await ensureColumn('task_logs', 'cdk_code', 'VARCHAR(32) NULL');
     await ensureColumn('task_logs', 'card_last4', 'VARCHAR(4) NULL');
     await ensureColumn('task_logs', 'status', "VARCHAR(32) NOT NULL DEFAULT 'running'");
-    await ensureColumn('task_logs', 'message', 'VARCHAR(255) NULL');
+    await ensureColumn('task_logs', 'message', 'TEXT NULL');
+    // 旧版本 message 是 VARCHAR(255)，注册失败时带页面片段会超长并导致整个服务崩溃。
+    // 启动时统一扩大现有列，保证失败日志可以正常落库。
+    await runQuery('ALTER TABLE task_logs MODIFY COLUMN message TEXT NULL');
     await ensureColumn('task_logs', 'progress', 'INT NOT NULL DEFAULT 0');
     await ensureColumn('task_logs', 'display_time', "VARCHAR(64) NOT NULL DEFAULT ''");
     await ensureColumn('task_logs', 'raw_output', 'MEDIUMTEXT NULL');
@@ -301,7 +295,6 @@ async function ensureLegacyColumns() {
     await ensureColumn('pool_emails', 'status', "VARCHAR(32) NOT NULL DEFAULT '正常'");
 
     await ensureColumn('product_assets', 'imap_key', 'VARCHAR(64) NULL');
-    await ensureColumn('product_assets', 'claimed_cdk', 'VARCHAR(32) NULL');
     await ensureColumn('product_assets', 'token', 'TEXT NULL');
     await ensureColumn('product_assets', 'auth_json', 'TEXT NULL');
     await ensureColumn('product_assets', 'file_path', 'VARCHAR(512) NULL');
@@ -320,7 +313,6 @@ async function ensureReady() {
 }
 
 function parseAdminProductGenerationTask(row) {
-    const cdkCode = String(row?.cdk_code || '');
     let payload = null;
 
     try {
@@ -345,17 +337,11 @@ function parseAdminProductGenerationTask(row) {
         lastError = String(payload.lastError || '').trim();
     }
 
-    if (!targetCount) {
-        const match = cdkCode.match(/^ADMIN_PRODUCT_GEN:(\d+)$/);
-        targetCount = match ? Math.max(0, Number(match[1]) || 0) : 0;
-    }
-
     completedCount = Math.min(targetCount, completedCount);
     const remainingCount = Math.max(0, targetCount - completedCount);
 
     return {
         jobKey: String(row?.job_key || ''),
-        cdkCode,
         status: String(row?.status || ''),
         targetCount,
         completedCount,
@@ -383,10 +369,10 @@ function isResumableProductGenerationTask(task) {
 
 async function getResumableAdminProductGeneration() {
     const runningRows = await runQuery(
-        `SELECT job_key, cdk_code, raw_output, status
+        `SELECT job_key, token_preview, raw_output, status
          FROM task_logs
          WHERE status = 'running'
-           AND cdk_code LIKE 'ADMIN_PRODUCT_GEN:%'
+           AND token_preview = 'ADMIN_PRODUCT_GEN'
          ORDER BY created_at DESC, id DESC`
     );
 
@@ -395,10 +381,10 @@ async function getResumableAdminProductGeneration() {
     }
 
     const failedRows = await runQuery(
-        `SELECT job_key, cdk_code, raw_output, status
+        `SELECT job_key, token_preview, raw_output, status
          FROM task_logs
          WHERE status = 'failed'
-           AND cdk_code LIKE 'ADMIN_PRODUCT_GEN:%'
+           AND token_preview = 'ADMIN_PRODUCT_GEN'
          ORDER BY created_at DESC, id DESC
          LIMIT 20`
     );
@@ -414,11 +400,11 @@ async function getResumableAdminProductGeneration() {
 }
 
 async function getAdminData() {
-    const [configRows, phoneRows, cardRows, logRows, statsRows, cdkStatsRows] = await Promise.all([
+    const [configRows, phoneRows, cardRows, logRows, statsRows] = await Promise.all([
         runQuery(
             `SELECT config_key, config_value
              FROM app_config
-             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 'proxy',
                 'max_concurrent_activations',
@@ -432,7 +418,9 @@ async function getAdminData() {
                 'email_source',
                 'inbox_api_base',
                 'inbox_email_domain',
-                'inbox_email_domains'
+                'inbox_email_domains',
+                'inbox_admin_password',
+                'inbox_enable_random_subdomain'
             ]
         ),
         runQuery(
@@ -446,10 +434,9 @@ async function getAdminData() {
              ORDER BY sort_order ASC, id ASC`
         ),
         runQuery(
-            `SELECT l.job_key, l.display_time, l.token_preview, l.cdk_code, l.phone, l.card_last4, l.status, l.message, l.progress, c.type AS cdk_type
-             FROM task_logs l
-             LEFT JOIN cdk_codes c ON l.cdk_code = c.cdk_code
-             ORDER BY l.created_at DESC, l.id DESC
+            `SELECT job_key, display_time, token_preview, phone, card_last4, status, message, progress
+             FROM task_logs
+             ORDER BY created_at DESC, id DESC
              LIMIT 200`
         ),
         runQuery(
@@ -459,24 +446,15 @@ async function getAdminData() {
                 COALESCE(SUM(status IN ('failed', 'card_invalid')), 0) AS failed
              FROM task_logs`
         ),
-        runQuery(
-            `SELECT
-                COUNT(*) AS total,
-                COALESCE(SUM(used_at IS NOT NULL), 0) AS used_count,
-                COALESCE(SUM(used_at IS NULL), 0) AS unused_count
-             FROM cdk_codes
-             WHERE is_active = 1`
-        )
     ]);
 
     const stats = statsRows[0] || {};
-    const cdkStats = cdkStatsRows[0] || {};
     const configMap = Object.fromEntries(configRows.map((row) => [row.config_key, row.config_value]));
     const productPendingRows = await runQuery(
-        `SELECT cdk_code, raw_output
+        `SELECT token_preview, raw_output
          FROM task_logs
          WHERE status = 'running'
-           AND cdk_code LIKE 'ADMIN_PRODUCT_GEN:%'`
+           AND token_preview = 'ADMIN_PRODUCT_GEN'`
     );
 
     const productPendingTotal = productPendingRows.reduce((sum, row) => {
@@ -502,6 +480,8 @@ async function getAdminData() {
             inbox_api_base: String(configMap.inbox_api_base || 'https://temp-email-api.jzqkwl.com').trim().replace(/\/+$/, '') || 'https://temp-email-api.jzqkwl.com',
             inbox_email_domain: String(configMap.inbox_email_domain || '').trim().replace(/^@/, ''),
             inbox_email_domains: String(configMap.inbox_email_domains || '').split(/[\n,;\s]+/).map((d) => d.trim().replace(/^@/, '')).filter(Boolean),
+            inbox_admin_password_configured: Boolean(String(configMap.inbox_admin_password || '').trim()),
+            inbox_enable_random_subdomain: String(configMap.inbox_enable_random_subdomain || '1') === '1',
             phone_pool: phoneRows.map((row) => ({
                 phone: row.phone,
                 key: row.sms_api_key,
@@ -526,9 +506,6 @@ async function getAdminData() {
             total: Number(stats.total || 0),
             success: Number(stats.success || 0),
             failed: Number(stats.failed || 0),
-            cdk_total: Number(cdkStats.total || 0),
-            cdk_used: Number(cdkStats.used_count || 0),
-            cdk_unused: Number(cdkStats.unused_count || 0),
             product_total: (await runQuery(`SELECT COUNT(*) AS count FROM product_assets`))[0]?.count || 0,
             product_disabled: (await runQuery(`SELECT COUNT(*) AS count FROM product_assets WHERE status = '灏佺'`))[0]?.count || 0,
             product_pending: productPendingTotal,
@@ -540,13 +517,15 @@ async function getAdminData() {
             product_resume_job_key: resumableTask?.jobKey || ''
         },
         logs: logRows.map((row) => {
-            const isAdminProductGeneration = String(row.cdk_code || '').startsWith('ADMIN_PRODUCT_GEN:');
+            const taskType = {
+                ADMIN_PRODUCT_GEN: '成品生产',
+                ADMIN_FREE_ACCOUNT_GEN: '免费号生成'
+            }[String(row.token_preview || '')] || '系统任务';
             return {
                 id: row.job_key,
                 time: row.display_time,
-                token: repairTaskText(isAdminProductGeneration ? '绯荤粺鐢熸垚' : row.token_preview),
-                cdk: repairTaskText(isAdminProductGeneration ? '绯荤粺鐢熸垚' : (row.cdk_code || '')),
-                type: repairTaskText(isAdminProductGeneration ? '鎴愬搧鐢熶骇' : (row.cdk_type || '鑷姪')),
+                token: repairTaskText(row.token_preview || ''),
+                type: repairTaskText(taskType),
                 phone: row.phone,
                 message: repairTaskText(row.message || ''),
                 cardLast4: row.card_last4 || '',
@@ -592,13 +571,28 @@ async function saveConfig(config) {
             .filter(Boolean);
     })();
     const inboxEmailDomainsRaw = inboxEmailDomainsList.join('\n');
+    const requestedInboxAdminPassword = config?.inbox_admin_password;
+    const inboxEnableRandomSubdomain = config?.inbox_enable_random_subdomain === false
+        || String(config?.inbox_enable_random_subdomain || '1') === '0'
+        ? '0'
+        : '1';
     const phonePool = normalizePhonePool(Array.isArray(config?.phone_pool) ? config.phone_pool : []);
     const cardPool = normalizeCardPool(Array.isArray(config?.card_pool) ? config.card_pool : []);
 
     await withTransaction(async (connection) => {
+        const existingInboxPasswordRows = await runQuery(
+            `SELECT config_value FROM app_config WHERE config_key = ? LIMIT 1`,
+            ['inbox_admin_password'],
+            { connection }
+        );
+        const existingInboxAdminPassword = String(existingInboxPasswordRows[0]?.config_value || '');
+        const inboxAdminPasswordToSave = String(requestedInboxAdminPassword ?? '').trim()
+            ? String(requestedInboxAdminPassword)
+            : existingInboxAdminPassword;
+
         await runExecute(
             `INSERT INTO app_config (config_key, config_value)
-             VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)
+             VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)
              ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
             [
                 'proxy', proxy,
@@ -613,7 +607,9 @@ async function saveConfig(config) {
                 'email_source', emailSource,
                 'inbox_api_base', inboxApiBase,
                 'inbox_email_domain', inboxEmailDomain,
-                'inbox_email_domains', inboxEmailDomainsRaw
+                'inbox_email_domains', inboxEmailDomainsRaw,
+                'inbox_admin_password', inboxAdminPasswordToSave,
+                'inbox_enable_random_subdomain', inboxEnableRandomSubdomain
             ],
             { connection }
         );
@@ -674,138 +670,6 @@ async function saveConfig(config) {
     });
 }
 
-async function listCdks() {
-    const rows = await runQuery(
-        `SELECT cdk_code, shipped_at, used_at, type
-         FROM cdk_codes
-         WHERE is_active = 1
-         ORDER BY created_at DESC, id DESC`
-    );
-
-    const runningRows = await runQuery(
-        `SELECT cdk_code, MAX(updated_at) AS updated_at
-         FROM task_logs
-         WHERE status = 'running'
-           AND cdk_code IS NOT NULL
-         GROUP BY cdk_code`
-    );
-    const runningSet = new Set(runningRows.map((row) => String(row.cdk_code || '').trim()).filter(Boolean));
-
-    return rows.map((row) => ({
-        code: row.cdk_code,
-        status: runningSet.has(String(row.cdk_code || '').trim())
-            ? 'processing'
-            : (row.used_at ? 'used' : 'unused'),
-        type: row.type || '鑷姪',
-        shipped: Boolean(row.shipped_at),
-        shipped_at: row.shipped_at
-            ? new Date(row.shipped_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
-            : null,
-        used_at: row.used_at
-            ? new Date(row.used_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
-            : null
-    }));
-}
-
-async function markCdkShipped(cdk) {
-    const result = await runExecute(
-        `UPDATE cdk_codes
-         SET shipped_at = COALESCE(shipped_at, CURRENT_TIMESTAMP)
-         WHERE cdk_code = ?
-           AND is_active = 1`,
-        [String(cdk)]
-    );
-    return result.affectedRows > 0;
-}
-async function insertCdks(cdks, options = {}) {
-    const normalized = normalizeCdks(cdks);
-    if (normalized.length === 0) {
-        return {
-            insertedCount: 0,
-            duplicateCount: 0,
-            totalCount: 0
-        };
-    }
-
-    const values = normalized.map((cdk) => [cdk, 1, options.type || '鑷姪']);
-    console.log(`姝ｅ湪鎻掑叆 ${values.length} 涓?CDK, 绫诲瀷: ${options.type || '鑷姪'}`);
-
-    const [result] = await getPool().query(
-        `INSERT INTO cdk_codes (cdk_code, is_active, type) VALUES ?`,
-        [values]
-    );
-
-    const insertedCount = Number(result?.affectedRows || 0);
-    console.log(`鎻掑叆瀹屾垚, 褰卞搷琛屾暟: ${insertedCount}`);
-
-    return {
-        insertedCount,
-        duplicateCount: Math.max(0, normalized.length - insertedCount),
-        totalCount: normalized.length
-    };
-}
-
-async function deleteCdk(cdk) {
-    await runExecute(`DELETE FROM cdk_codes WHERE cdk_code = ?`, [String(cdk)]);
-}
-
-async function verifyCdk(cdk) {
-    const rows = await runQuery(
-        `SELECT COUNT(*) AS count
-         FROM cdk_codes
-         WHERE cdk_code = ?
-           AND is_active = 1
-           AND used_at IS NULL`,
-        [String(cdk)]
-    );
-
-    return Number(rows[0]?.count || 0) > 0;
-}
-
-async function verifyCdkDetails(cdk) {
-    const rows = await runQuery(
-        `SELECT * FROM cdk_codes
-         WHERE cdk_code = ?
-           AND is_active = 1`,
-        [String(cdk)]
-    );
-    return rows[0] || null;
-}
-
-async function recordCdkFailure(cdk) {
-    // 澧炲姞澶辫触娆℃暟
-    await runExecute(
-        `UPDATE cdk_codes 
-         SET fail_count = fail_count + 1 
-         WHERE cdk_code = ?`,
-        [String(cdk)]
-    );
-
-    // 妫€鏌ユ槸鍚﹁揪鍒?3 娆?
-    const cdkDetails = await verifyCdkDetails(cdk);
-    if (cdkDetails && cdkDetails.fail_count >= 3) {
-        // 杈惧埌 3 娆★紝璁剧疆 10 鍒嗛挓鍐峰嵈锛屽苟閲嶇疆澶辫触娆℃暟
-        await runExecute(
-            `UPDATE cdk_codes 
-             SET cooldown_until = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 10 MINUTE),
-                 fail_count = 0
-             WHERE cdk_code = ?`,
-            [String(cdk)]
-        );
-        return true; // 瑙﹀彂浜嗗喎鍗?
-    }
-    return false;
-}
-
-async function resetCdkFailure(cdk) {
-    await runExecute(
-        `UPDATE cdk_codes 
-         SET fail_count = 0, cooldown_until = NULL 
-         WHERE cdk_code = ?`,
-        [String(cdk)]
-    );
-}
-
 async function getActivationAttemptLimit(scopeType, scopeKey) {
     const rows = await runQuery(
         `SELECT scope_type, scope_key, fail_count, cooldown_until
@@ -847,28 +711,6 @@ async function resetActivationAttemptFailure(scopeType, scopeKey) {
          WHERE scope_type = ?
            AND scope_key = ?`,
         [String(scopeType), String(scopeKey)]
-    );
-}
-
-async function markCdkUsed(cdk) {
-    const result = await runExecute(
-        `UPDATE cdk_codes
-         SET used_at = CURRENT_TIMESTAMP
-         WHERE cdk_code = ?
-           AND is_active = 1
-           AND used_at IS NULL`,
-        [String(cdk)]
-    );
-    return result.affectedRows > 0;
-}
-
-async function markCdkUnused(cdk) {
-    await runExecute(
-        `UPDATE cdk_codes
-         SET used_at = NULL
-         WHERE cdk_code = ?
-           AND is_active = 1`,
-        [String(cdk)]
     );
 }
 
@@ -1148,6 +990,36 @@ async function listPoolEmails() {
         status: String(row.status || '正常'),
         created_at: row.created_at
     }));
+}
+
+async function saveGeneratedFreePoolAccount({ email, accessToken, authJson = '' } = {}) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const token = String(accessToken || '').trim();
+    const normalizedAuthJson = typeof authJson === 'string'
+        ? authJson.trim()
+        : JSON.stringify(authJson || {});
+    if (!normalizedEmail || !token) {
+        throw new Error('免费号入池缺少邮箱或 Access Token');
+    }
+
+    await runExecute(
+        `INSERT INTO pool_emails
+            (email, password, access_token, auth_json, token_updated_at, registered, registered_at, plus_registered, in_use, status, is_active)
+         VALUES (?, '', ?, ?, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, 0, 0, '正常', 1)
+         ON DUPLICATE KEY UPDATE
+            access_token = VALUES(access_token),
+            auth_json = CASE WHEN VALUES(auth_json) <> '' THEN VALUES(auth_json) ELSE pool_emails.auth_json END,
+            token_updated_at = CURRENT_TIMESTAMP,
+            registered = 1,
+            registered_at = COALESCE(pool_emails.registered_at, CURRENT_TIMESTAMP)`,
+        [normalizedEmail, token, normalizedAuthJson]
+    );
+
+    const rows = await runQuery(
+        `SELECT id FROM pool_emails WHERE email = ? LIMIT 1`,
+        [normalizedEmail]
+    );
+    return Number(rows[0]?.id || 0) || 0;
 }
 
 async function listFreePoolAccounts() {
@@ -1570,22 +1442,21 @@ async function updateAdminPassword(password) {
     };
 }
 
-async function createTaskLog({ tokenPreview, cdkCode, phone, cardLast4, status, progress = 0 }) {
+async function createTaskLog({ tokenPreview, phone, cardLast4, status, progress = 0 }) {
     const now = new Date();
     const displayTime = now.toLocaleString('zh-CN', { hour12: false });
     const jobKey = `${now.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
     const message = String(status) === 'running' ? '正在开通中' : null;
 
     await runExecute(
-        `INSERT INTO task_logs (job_key, token_preview, cdk_code, phone, card_last4, status, message, progress, display_time, raw_output)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO task_logs (job_key, token_preview, phone, card_last4, status, message, progress, display_time, raw_output)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         [
             jobKey,
-            String(tokenPreview),
-            cdkCode || null,
+            String(tokenPreview || ''),
             phone || null,
             cardLast4 || null,
-            String(status),
+            String(status || 'running'),
             message,
             Number(progress || 0),
             displayTime
@@ -1597,33 +1468,21 @@ async function createTaskLog({ tokenPreview, cdkCode, phone, cardLast4, status, 
 
 async function getTaskStatus(jobKey) {
     const rows = await runQuery(
-        `SELECT status, message, progress, raw_output, cdk_code, phone, card_last4
+        `SELECT status, message, progress, raw_output, phone, card_last4
          FROM task_logs
          WHERE job_key = ?
          LIMIT 1`,
         [String(jobKey)]
     );
-    if (!rows[0]) {
-        return null;
-    }
+    if (!rows[0]) return null;
     return {
-        ...rows[0],
+        status: rows[0].status,
         message: repairTaskText(rows[0].message || ''),
-        cdk_code: repairTaskText(rows[0].cdk_code || '')
+        progress: Number(rows[0].progress || 0),
+        raw_output: rows[0].raw_output || null,
+        phone: rows[0].phone || null,
+        card_last4: rows[0].card_last4 || null
     };
-}
-
-async function getRunningTaskByCdk(cdk) {
-    const rows = await runQuery(
-        `SELECT job_key, status, message, progress, updated_at
-         FROM task_logs
-         WHERE cdk_code = ?
-           AND status = 'running'
-         ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-        [String(cdk)]
-    );
-    return rows[0] || null;
 }
 
 async function deleteTaskLogByJobKey(jobKey) {
@@ -1635,14 +1494,28 @@ async function deleteTaskLogByJobKey(jobKey) {
     return { deleted: Number(result.affectedRows || 0) };
 }
 
-async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phone, cardLast4, progress }) {
+async function deleteTaskLogsByJobKeys(jobKeys = []) {
+    const normalizedKeys = Array.from(new Set((Array.isArray(jobKeys) ? jobKeys : [])
+        .map((key) => String(key || '').trim())
+        .filter(Boolean)))
+        .slice(0, 200);
+    if (!normalizedKeys.length) {
+        return { deleted: 0 };
+    }
+    const result = await runExecute(
+        `DELETE FROM task_logs WHERE job_key IN (${normalizedKeys.map(() => '?').join(',')})`,
+        normalizedKeys
+    );
+    return { deleted: Number(result?.affectedRows || 0) };
+}
+
+async function updateTaskLog(jobKey, { status, message, rawOutput, phone, cardLast4, progress }) {
     await runExecute(
         `UPDATE task_logs
          SET status = ?,
              message = COALESCE(?, message),
              raw_output = COALESCE(?, raw_output),
              progress = GREATEST(progress, COALESCE(?, progress)),
-             cdk_code = COALESCE(?, cdk_code),
              phone = COALESCE(?, phone),
              card_last4 = COALESCE(?, card_last4)
          WHERE job_key = ?`,
@@ -1651,7 +1524,6 @@ async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phon
             message || null,
             rawOutput || null,
             progress == null ? null : Number(progress),
-            cdkCode || null,
             phone || null,
             cardLast4 || null,
             String(jobKey)
@@ -1661,28 +1533,9 @@ async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phon
 
 async function listProducts() {
     const rows = await runQuery(
-        `SELECT p.id,
-                p.email,
-                p.imap_key,
-                COALESCE(
-                    p.claimed_cdk,
-                    (
-                        SELECT l.cdk_code
-                        FROM task_logs l
-                        WHERE l.status = 'success'
-                          AND l.cdk_code IS NOT NULL
-                          AND l.cdk_code <> ''
-                          AND l.message LIKE CONCAT('%', p.email, '%')
-                        ORDER BY l.created_at DESC, l.id DESC
-                        LIMIT 1
-                    )
-                ) AS claimed_cdk,
-                p.file_path,
-                p.status,
-                p.shipped,
-                p.created_at
-         FROM product_assets p
-         ORDER BY p.id DESC`
+        `SELECT id, email, imap_key, file_path, status, shipped, created_at
+         FROM product_assets
+         ORDER BY id DESC`
     );
     return rows.map(row => ({
         ...row,
@@ -1733,76 +1586,12 @@ async function updateProductImapKeyByEmail(email, imapKey) {
     );
 }
 
-async function updateProductClaimedCdkByEmail(email, claimedCdk) {
-    await runExecute(
-        `UPDATE product_assets SET claimed_cdk = ? WHERE email = ?`,
-        [claimedCdk ? String(claimedCdk) : null, String(email)]
-    );
-}
-
 async function deleteProduct(id) {
     await runExecute(`DELETE FROM product_assets WHERE id = ?`, [id]);
 }
 
 async function updateProductStatus(id, status) {
     await runExecute(`UPDATE product_assets SET status = ? WHERE id = ?`, [status, id]);
-}
-
-async function claimProductAccount(cdk) {
-    return withTransaction(async (connection) => {
-        // 1. 楠岃瘉 CDK
-        const [cdkRows] = await connection.query(
-            `SELECT * FROM cdk_codes WHERE cdk_code = ? AND is_active = 1 AND used_at IS NULL AND type = '鎴愬搧' FOR UPDATE`,
-            [cdk]
-        );
-        const cdkData = cdkRows[0];
-        if (!cdkData) {
-            throw new Error('CDK 鏃犳晥銆佸凡浣跨敤鎴栭潪鎴愬搧婵€娲荤爜');
-        }
-
-        // 2. 鏌ユ壘鍙敤鎴愬搧璐﹀彿
-        const [productRows] = await connection.query(
-            `SELECT * FROM product_assets WHERE shipped = 0 AND status = '姝ｅ父' ORDER BY id ASC LIMIT 1 FOR UPDATE`
-        );
-        const product = productRows[0];
-        if (!product) {
-            throw new Error('褰撳墠鎴愬搧鍙峰簱鏆傛椂缂鸿揣锛岃鑱旂郴瀹㈡湇琛ュ厖');
-        }
-
-        // 3. 鏍囪 CDK 宸蹭娇鐢?
-        await connection.query(
-            `UPDATE cdk_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?`,
-            [cdkData.id]
-        );
-
-        // 4. 鏍囪鎴愬搧鍙峰凡鍑哄簱
-        await connection.query(
-            `UPDATE product_assets SET shipped = 1, claimed_cdk = ? WHERE id = ?`,
-            [String(cdk), product.id]
-        );
-
-        // 5. 鍒涘缓鎴愬姛鏃ュ織
-        const jobKey = `PROD-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        await connection.query(
-            `INSERT INTO task_logs (job_key, token_preview, cdk_code, status, message, progress, display_time)
-             VALUES (?, ?, ?, 'success', ?, 100, ?)`,
-            [
-                jobKey,
-                'PRODUCT_CLAIM',
-                cdk,
-                `鎴愬搧鍙峰厬鎹㈡垚鍔? ${product.email}`,
-                new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
-            ]
-        );
-
-        return {
-            email: product.email,
-            password: product.password,
-            token: product.token,
-            imapKey: product.imap_key || '',
-            jobKey
-        };
-    });
 }
 
 async function updateProductStatusByEmail(email, status) {
@@ -1836,89 +1625,6 @@ async function markProductShippedByEmail(email, shipped = 1) {
     await runExecute(`UPDATE product_assets SET shipped = ? WHERE email = ?`, [shipped, email]);
 }
 
-async function getClaimedProductDownloadInfo(cdk) {
-    const logRows = await runQuery(
-        `SELECT message, raw_output
-         FROM task_logs
-         WHERE cdk_code = ?
-           AND status = 'success'
-         ORDER BY created_at DESC, id DESC
-         LIMIT 1`,
-        [String(cdk)]
-    );
-
-    const logRow = logRows[0] || null;
-    if (!logRow) {
-        return null;
-    }
-
-    const message = String(logRow.message || '');
-    let email = '';
-    let filePath = '';
-    let imapKey = '';
-
-    const messageMatch = message.match(/[:：]\s*(.+)$/);
-    if (messageMatch) {
-        email = String(messageMatch[1] || '').trim();
-    }
-
-    try {
-        const parsed = logRow.raw_output ? JSON.parse(logRow.raw_output) : null;
-        if (!email) {
-            email = String(parsed?.email || '').trim();
-        }
-        filePath = String(parsed?.sub2apiPath || parsed?.filePath || '').trim();
-        imapKey = String(parsed?.imapKey || '').trim();
-    } catch (_) { }
-
-    if (filePath && imapKey) {
-        return {
-            email,
-            filePath,
-            imapKey
-        };
-    }
-
-    if (!email) {
-        const claimedRows = await runQuery(
-            `SELECT email, imap_key, file_path
-             FROM product_assets
-             WHERE claimed_cdk = ?
-             ORDER BY id DESC
-             LIMIT 1`,
-            [String(cdk)]
-        );
-        const claimedProduct = claimedRows[0];
-        if (!claimedProduct || !claimedProduct.file_path) {
-            return null;
-        }
-        return {
-            email: claimedProduct.email,
-            filePath: filePath || claimedProduct.file_path,
-            imapKey: imapKey || claimedProduct.imap_key || ''
-        };
-    }
-
-    const productRows = await runQuery(
-        `SELECT email, imap_key, file_path, status, shipped
-         FROM product_assets
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        [email]
-    );
-    const product = productRows[0];
-    if (!product || !product.file_path) {
-        return null;
-    }
-
-    return {
-        email: product.email,
-        filePath: filePath || product.file_path,
-        imapKey: imapKey || product.imap_key || ''
-    };
-}
-
 module.exports = {
     ensureReady,
     getAdminData,
@@ -1926,16 +1632,6 @@ module.exports = {
     saveConfig,
     getAdminAuthConfig,
     updateAdminPassword,
-    listCdks,
-    markCdkShipped,
-    insertCdks,
-    deleteCdk,
-    verifyCdk,
-    verifyCdkDetails,
-    markCdkUsed,
-    markCdkUnused,
-    recordCdkFailure,
-    resetCdkFailure,
     getActivationAttemptLimit,
     recordActivationAttemptFailure,
     resetActivationAttemptFailure,
@@ -1944,6 +1640,7 @@ module.exports = {
     bulkImportPoolEmails,
     listPoolEmails,
     listFreePoolAccounts,
+    saveGeneratedFreePoolAccount,
     getPoolEmailCredentials,
     deletePoolEmail,
     deletePoolEmails,
@@ -1967,23 +1664,20 @@ module.exports = {
     setMaintenanceModeState,
     createTaskLog,
     deleteTaskLogByJobKey,
+    deleteTaskLogsByJobKeys,
     getTaskStatus,
-    getRunningTaskByCdk,
     updateTaskLog,
     listProducts,
     addProduct,
     upsertPendingProduct,
     markProductReadyByEmail,
     updateProductImapKeyByEmail,
-    updateProductClaimedCdkByEmail,
     deleteProduct,
     updateProductStatus,
     updateProductStatusByEmail,
     updateProductStatusByEmails,
     markProductShipped,
     markProductShippedByEmail,
-    claimProductAccount,
-    getClaimedProductDownloadInfo,
     connectionInfo: {
         host: DB_HOST,
         port: DB_PORT,
