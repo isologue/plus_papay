@@ -21,6 +21,16 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
 
+  # FlareSolverr 仅供可选的 Cloudflare 自动校验诊断使用；不暴露到宿主机端口。
+  # 需要启用时设置 OPENAI_FLARESOLVERR=1，注册器仍使用与主浏览器相同的代理出口。
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-warning}
+
   app:
     build:
       context: .
@@ -56,6 +66,15 @@ services:
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-60}
       ASSET_LOCK_STALE_MS: ${ASSET_LOCK_STALE_MS:-900000}
       HEADFUL: ${HEADFUL:-0}
+      # 1 = 排查 OpenAI 登录链路时输出脱敏网络状态（不输出 Cookie、邮箱、Token、代理）
+      OPENAI_NETWORK_DEBUG: ${OPENAI_NETWORK_DEBUG:-0}
+      # 1 = 遇到不稳定 HTTP 代理时，强制 Chromium 使用 HTTP/1.1（仅注册器）
+      OPENAI_FORCE_HTTP1: ${OPENAI_FORCE_HTTP1:-0}
+      # 可选 FlareSolverr 预热。默认只诊断，Cookie 注入须显式开启。
+      OPENAI_FLARESOLVERR: ${OPENAI_FLARESOLVERR:-0}
+      FLARESOLVERR_URL: ${FLARESOLVERR_URL:-http://flaresolverr:8191}
+      FLARESOLVERR_TIMEOUT_SEC: ${FLARESOLVERR_TIMEOUT_SEC:-60}
+      OPENAI_FLARESOLVERR_APPLY_COOKIES: ${OPENAI_FLARESOLVERR_APPLY_COOKIES:-0}
       CHROMIUM_CHANNEL: ${CHROMIUM_CHANNEL:-}
       CHROMIUM_EXECUTABLE_PATH: /usr/bin/chromium
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright

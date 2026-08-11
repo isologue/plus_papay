@@ -1,0 +1,2 @@
+[    3407ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://auth-cdn.oaistatic.com/assets/app-core-By4u8bg9.css#:0
+[    3423ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://auth-cdn.oaistatic.com/assets/manifest-d740cb19.js:0

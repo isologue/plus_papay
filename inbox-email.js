@@ -1,10 +1,30 @@
 const axios = require('axios');
+const { ProxyAgent } = require('proxy-agent');
 const { simpleParser } = require('mailparser');
 
 const DEFAULT_API_BASE = 'https://temp-email-api.jzqkwl.com';
 
 function trimBaseUrl(raw) {
     return String(raw || DEFAULT_API_BASE).trim().replace(/\/+$/, '') || DEFAULT_API_BASE;
+}
+
+// INBOX API 与浏览器注册必须走同一份全局代理；否则容器里的 Node 请求会直连，
+// 在本机出口被拦截/不稳定时会出现 TLS socket hang up，而浏览器却走了代理。
+function buildAxiosProxyOptions(proxyValue) {
+    const rawProxy = String(proxyValue || '').trim();
+    if (!rawProxy) return {};
+    try {
+        const agent = new ProxyAgent(rawProxy);
+        return {
+            httpAgent: agent,
+            httpsAgent: agent,
+            // 禁用 Axios 自己的 proxy 解析，统一交由 ProxyAgent 处理 HTTP / HTTPS / SOCKS。
+            proxy: false
+        };
+    } catch (error) {
+        console.warn(`⚠️ [Inbox] 全局代理格式无效，INBOX 将直连: ${String(error?.message || 'unknown').slice(0, 120)}`);
+        return {};
+    }
 }
 
 /**
@@ -17,7 +37,8 @@ async function createAddress({
     name = 'admin',
     domain = '',
     enablePrefix,
-    enableRandomSubdomain
+    enableRandomSubdomain,
+    proxyValue = ''
 } = {}) {
     // Cloudflare Temp Email 禁用匿名 /api/new_address 后，必须走管理员接口。
     // 与 chatgpt2api 的 CloudflareTempMailProvider 保持一致：
@@ -32,13 +53,15 @@ async function createAddress({
         body.enableRandomSubdomain = enableRandomSubdomain;
     }
 
+    const axiosProxyOptions = buildAxiosProxyOptions(proxyValue);
     const resp = await axios.post(url, body, {
         headers: {
             'Content-Type': 'application/json',
             'x-admin-auth': String(adminPassword || '')
         },
         timeout: 20000,
-        validateStatus: () => true
+        validateStatus: () => true,
+        ...axiosProxyOptions
     });
 
     if (resp.status !== 200 || !resp.data || !resp.data.address || !resp.data.jwt) {
@@ -88,7 +111,8 @@ async function fetchLatestOpenAiOtp({
     maxRetries = 24,
     excludeCode = '',
     onNoNewCodeFor30Seconds = null,
-    onBeforePoll = null
+    onBeforePoll = null,
+    proxyValue = ''
 } = {}) {
     if (!jwt) {
         throw new Error('缺少邮箱 JWT，无法拉取邮件');
@@ -96,6 +120,7 @@ async function fetchLatestOpenAiOtp({
 
     const url = `${trimBaseUrl(baseUrl)}/api/mails?limit=10&offset=0`;
     const headers = { Authorization: `Bearer ${jwt}` };
+    const axiosProxyOptions = buildAxiosProxyOptions(proxyValue);
     let lastResendAt = 0;
 
     console.log(`📨 [Inbox] 正在为 ${address || '(未知地址)'} 通过 ${baseUrl || DEFAULT_API_BASE} 获取验证码...`);
@@ -113,7 +138,12 @@ async function fetchLatestOpenAiOtp({
         }
 
         try {
-            const resp = await axios.get(url, { headers, timeout: 15000, validateStatus: () => true });
+            const resp = await axios.get(url, {
+                headers,
+                timeout: 15000,
+                validateStatus: () => true,
+                ...axiosProxyOptions
+            });
             if (resp.status !== 200) {
                 console.warn(`⚠️  [Inbox] 拉取邮件 HTTP ${resp.status}: ${typeof resp.data === 'string' ? resp.data : ''}`);
             } else {

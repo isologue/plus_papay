@@ -344,6 +344,86 @@ function buildPlaywrightProxy(proxyValue) {
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
+
+function isEnabled(value) {
+    return /^(1|true|yes)$/i.test(String(value || '').trim());
+}
+
+function toPlaywrightClearanceCookies(rawCookies) {
+    const allowedHosts = new Set(['openai.com', 'auth.openai.com']);
+    const result = [];
+    for (const rawCookie of Array.isArray(rawCookies) ? rawCookies : []) {
+        const name = String(rawCookie?.name || '').trim();
+        const value = String(rawCookie?.value || '');
+        const domain = String(rawCookie?.domain || '').trim().toLowerCase().replace(/^\./, '');
+        if (!name || !value || !domain || ![...allowedHosts].some((host) => host === domain || host.endsWith(`.${domain}`))) {
+            continue;
+        }
+        const cookie = {
+            name,
+            value,
+            domain: `.${domain}`,
+            path: String(rawCookie?.path || '/').startsWith('/') ? String(rawCookie?.path || '/') : '/',
+            secure: rawCookie?.secure !== false,
+            httpOnly: Boolean(rawCookie?.httpOnly)
+        };
+        const expiry = Number(rawCookie?.expiry ?? rawCookie?.expires ?? 0);
+        if (Number.isFinite(expiry) && expiry > 0) cookie.expires = expiry;
+        result.push(cookie);
+    }
+    return result;
+}
+
+async function prewarmOpenAiClearance(context, proxyValue) {
+    if (!isEnabled(process.env.OPENAI_FLARESOLVERR)) {
+        return { attempted: false, injected: 0 };
+    }
+
+    const baseUrl = String(process.env.FLARESOLVERR_URL || 'http://flaresolverr:8191').trim().replace(/\/+$/, '');
+    const timeoutSec = Math.min(180, Math.max(15, Number(process.env.FLARESOLVERR_TIMEOUT_SEC || 60) || 60));
+    const payload = {
+        cmd: 'request.get',
+        url: 'https://auth.openai.com/log-in',
+        maxTimeout: timeoutSec * 1000
+    };
+    // FlareSolverr 的浏览器必须走与 Playwright 完全相同的出口；否则 clearance Cookie 不可复用。
+    if (String(proxyValue || '').trim()) payload.proxy = { url: String(proxyValue).trim() };
+
+    console.log(`🛡️  [FlareSolverr] 开始 OpenAI 自动校验诊断（最长 ${timeoutSec} 秒，同一代理出口）。`);
+    try {
+        const response = await axios.post(`${baseUrl}/v1`, payload, {
+            timeout: (timeoutSec + 30) * 1000,
+            headers: { 'Content-Type': 'application/json' },
+            validateStatus: () => true
+        });
+        const body = response.data && typeof response.data === 'object' ? response.data : {};
+        if (response.status !== 200 || body.status !== 'ok') {
+            console.warn(`⚠️  [FlareSolverr] 自动校验未得到成功结果（HTTP ${response.status || 0}）。`);
+            return { attempted: true, injected: 0, ok: false };
+        }
+
+        const solution = body.solution && typeof body.solution === 'object' ? body.solution : {};
+        const cookies = toPlaywrightClearanceCookies(solution.cookies);
+        const responseText = String(solution.response || '').toLowerCase();
+        const stillChallenged = /performing security verification|verify you are human|checking your browser|just a moment/.test(responseText);
+        const applyCookies = isEnabled(process.env.OPENAI_FLARESOLVERR_APPLY_COOKIES);
+        if (applyCookies && cookies.length > 0 && !stillChallenged) {
+            await context.addCookies(cookies);
+            console.log(`✅ [FlareSolverr] 自动校验返回 ${cookies.length} 个 OpenAI 域 Cookie，已注入本次浏览器上下文。`);
+            return { attempted: true, injected: cookies.length, ok: true };
+        }
+
+        const reason = stillChallenged
+            ? '返回页仍处于安全验证状态'
+            : (cookies.length ? 'Cookie 注入开关未开启' : '未返回可用的 OpenAI 域 Cookie');
+        console.warn(`⚠️  [FlareSolverr] 诊断完成，但暂不注入 Cookie：${reason}。`);
+        return { attempted: true, injected: 0, ok: !stillChallenged };
+    } catch (error) {
+        console.warn(`⚠️  [FlareSolverr] 自动校验服务不可用或超时：${String(error?.message || error).slice(0, 160)}`);
+        return { attempted: true, injected: 0, ok: false };
+    }
+}
+
 async function saveFailureScreenshot(page, prefix = 'register_openai_error') {
     if (!page || page.isClosed()) {
         return null;
@@ -967,7 +1047,8 @@ async function submitOtpWithRetry(page, email, maxAttempts = MAX_OTP_RETRIES, op
             ? await customFetchCode(lastCode, pollOpts)
             : await getLatestCode(normalizedEmail, pollOpts.maxRetries, lastCode, {
                 onNoNewCodeFor30Seconds: pollOpts.onNoNewCodeFor30Seconds,
-                onBeforePoll: pollOpts.onBeforePoll
+                onBeforePoll: pollOpts.onBeforePoll,
+                proxyValue
             });
         lastCode = code;
         if (beforeAttempt) {
@@ -1109,7 +1190,8 @@ async function runRegistrationFlow() {
                     name: 'admin',
                     adminPassword: inboxAdminPassword,
                     domain: tryDomain || undefined,
-                    enableRandomSubdomain: inboxEnableRandomSubdomain
+                    enableRandomSubdomain: inboxEnableRandomSubdomain,
+                    proxyValue
                 });
                 email = newInbox.address;
                 inboxJwt = newInbox.jwt;
@@ -1162,6 +1244,13 @@ async function runRegistrationFlow() {
                 '--disable-setuid-sandbox'
             ]
         };
+        // 某些 HTTP 代理会在 OpenAI CDN 的 HTTP/2 CONNECT 流上随机提前断连。
+        // 开关开启时让 Chromium 降级 HTTP/1.1；仅影响本注册器的浏览器进程。
+        const forceOpenAiHttp1 = /^(1|true|yes)$/i.test(String(process.env.OPENAI_FORCE_HTTP1 || ''));
+        if (forceOpenAiHttp1) {
+            launchOptions.args.push('--disable-http2', '--disable-quic');
+            console.log('🌐 [系统] 已启用 OpenAI 代理兼容模式（禁用 HTTP/2 / QUIC）。');
+        }
         if (CHROMIUM_CHANNEL) {
             launchOptions.channel = CHROMIUM_CHANNEL; // 'chrome' / 'msedge'
         } else if (CHROMIUM_EXECUTABLE_PATH) {
@@ -1413,6 +1502,57 @@ async function runRegistrationFlow() {
 
         page = await context.newPage();
 
+        // 仅在排查 OpenAI 登录问题时开启：记录域名、路径、状态和失败码，
+        // 刻意不记录 query、Cookie、请求体、邮箱、Token 或代理地址。
+        const openAiNetworkDebug = /^(1|true|yes)$/i.test(String(process.env.OPENAI_NETWORK_DEBUG || ''));
+        if (openAiNetworkDebug) {
+            const formatOpenAiUrl = (rawUrl) => {
+                try {
+                    const parsed = new URL(rawUrl);
+                    return `${parsed.hostname}${parsed.pathname}`;
+                } catch (_) {
+                    return 'invalid-url';
+                }
+            };
+            const isOpenAiNetworkUrl = (rawUrl) => {
+                try {
+                    const hostname = new URL(rawUrl).hostname.toLowerCase();
+                    return hostname === 'openai.com'
+                        || hostname.endsWith('.openai.com')
+                        || hostname === 'oaistatic.com'
+                        || hostname.endsWith('.oaistatic.com');
+                } catch (_) {
+                    return false;
+                }
+            };
+            page.on('requestfailed', (request) => {
+                if (!isOpenAiNetworkUrl(request.url())) return;
+                const failure = request.failure();
+                const errorText = failure?.errorText || 'unknown';
+                // 页面主动跳转时取消旧页面静态资源是正常现象，不作为网络故障记录。
+                if (errorText === 'net::ERR_ABORTED') return;
+                console.warn(`🛰️  [OpenAI Net] FAIL ${request.method()} ${formatOpenAiUrl(request.url())} :: ${errorText}`);
+            });
+            page.on('response', (response) => {
+                const request = response.request();
+                if (!isOpenAiNetworkUrl(request.url())) return;
+                const status = response.status();
+                const pathname = formatOpenAiUrl(request.url());
+                // 仅记录错误响应，以及认证/验证链路，避免静态资源成功日志淹没关键证据。
+                if (status >= 400 || /(?:auth\.openai\.com\/(?:log-in|create-account|authorize)|\/cdn-cgi\/challenge-platform|\/api\/)/i.test(pathname)) {
+                    console.log(`🛰️  [OpenAI Net] ${status} ${request.method()} ${pathname}`);
+                }
+            });
+            page.on('framenavigated', (frame) => {
+                if (frame !== page.mainFrame() || !isOpenAiNetworkUrl(frame.url())) return;
+                console.log(`🛰️  [OpenAI Net] NAV ${formatOpenAiUrl(frame.url())}`);
+            });
+            console.log('🛰️  [OpenAI Net] 已启用脱敏网络观测。');
+        }
+
+        // 可选预热：默认仅诊断，不跨浏览器注入 clearance，避免指纹失配。
+        await prewarmOpenAiClearance(context, proxyValue);
+
         const isOperationTimedOutPage = async () => {
             try {
                 const bodyText = await page.textContent('body', { timeout: 3000 }).catch(() => "");
@@ -1641,18 +1781,24 @@ async function runRegistrationFlow() {
             }
         };
 
+        // Cloudflare 的自动验证会在浏览器上下文内写入短期 Cookie。准备重试时如果清空它，
+        // 会把验证进度反复归零，导致一直停留在 “Performing security verification”。
+        let authCookiesInitialized = false;
         const openAuthEmailPage = async (maxAttempts = 3) => {
             let lastError = null;
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
-                    // auth.openai.com 会在无效/过期会话上短暂显示登录框，随后切到
-                    // “Your session has ended”。每次尝试都清掉旧的站点会话，并在登录框
-                    // 出现后立刻填写，避免人为等待让页面先被风控切走。
-                    await context.clearCookies().catch(() => { });
+                    // 仅在本次注册的首次访问清理遗留状态；后续尝试保留本次挑战已获得的 Cookie。
+                    if (!authCookiesInitialized) {
+                        await context.clearCookies().catch(() => { });
+                        authCookiesInitialized = true;
+                    }
                     await page.goto("https://openai.com/", { waitUntil: 'domcontentloaded', timeout: 30000 });
                     await page.goto("https://auth.openai.com/log-in", { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-                    const deadline = Date.now() + 12000;
+                    // Cloudflare 的无交互安全校验在代理较慢时可持续数十秒，不能沿用 12 秒短超时。
+                    const deadline = Date.now() + 45000;
+                    let waitingForCloudflare = false;
                     while (Date.now() < deadline) {
                         if (await page.locator('input[type="email"]').first().isVisible().catch(() => false)) {
                             return true;
@@ -1664,12 +1810,18 @@ async function runRegistrationFlow() {
                             throw new Error('OpenAI 登录会话在邮箱框出现前已结束');
                         }
                         if (await isCloudflareChallengePage()) {
+                            if (!waitingForCloudflare) {
+                                console.log('🛡️  [OpenAI] 正在等待 Cloudflare 自动安全校验完成（最长 45 秒）...');
+                                waitingForCloudflare = true;
+                            }
                             await page.waitForTimeout(2500);
                             continue;
                         }
                         await page.waitForTimeout(250);
                     }
-                    throw new Error('OpenAI 登录页邮箱框未及时出现');
+                    throw new Error(waitingForCloudflare
+                        ? 'Cloudflare 自动安全校验在 45 秒内未完成'
+                        : 'OpenAI 登录页邮箱框未及时出现');
                 } catch (error) {
                     lastError = error;
                     console.warn(`⚠️  [Warn] OpenAI 登录页第 ${attempt}/${maxAttempts} 次准备失败: ${error.message}`);
@@ -1779,11 +1931,19 @@ async function runRegistrationFlow() {
             await recoverOperationTimeout();
             console.log(`📧 ℹ️  [Info] 正在输入邮箱 (尝试 ${attempt}/3)...`);
             try {
-                await ensureInputValue(page, 'input[type="email"]', email, '邮箱输入框');
+                // auth.openai.com 的邮箱框可能只短暂可用。这里必须一次性 fill + click，
+                // 不能沿用逐字符“拟人输入”和 hover 停顿，否则会在提交前被切到
+                // “Your session has ended”。Playwright 的 fill 会触发 input/change 事件。
+                const emailInput = page.locator('input[type="email"]').first();
+                await emailInput.fill(email, { timeout: 5000 });
+                const writtenEmail = String(await emailInput.inputValue().catch(() => '') || '').trim().toLowerCase();
+                if (writtenEmail !== email.trim().toLowerCase()) {
+                    throw new Error('邮箱输入框快速写入未生效');
+                }
                 if (await isAuthErrorPage()) {
                     throw new Error('输入邮箱前登录会话已结束');
                 }
-                await humanClick(page, 'button[type="submit"]');
+                await page.locator('button[type="submit"]').first().click({ timeout: 5000 });
                 emailSubmitted = true;
                 console.log("⏳ [等待] 正在检测下一步流程（验证码 / 创建密码 / 合并页）...");
                 await recoverOperationTimeout();

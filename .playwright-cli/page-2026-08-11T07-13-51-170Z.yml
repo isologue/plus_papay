@@ -1,0 +1,31 @@
+- generic [ref=e3]:
+  - heading "欢迎回来" [level=1] [ref=e5]
+  - group [ref=e6]:
+    - form "选择登录选项" [ref=e7]:
+      - generic [ref=e11]:
+        - generic: 电子邮件地址
+        - textbox "电子邮件地址" [ref=e12]: automation-probe@openai-test.invalid
+      - generic [ref=e14]:
+        - button "继续" [active] [ref=e16] [cursor=pointer]
+        - generic [ref=e17]:
+          - text: 还没有账户？请
+          - link "注册" [ref=e18] [cursor=pointer]:
+            - /url: /create-account
+        - generic [ref=e19]: 或
+        - generic [ref=e23]:
+          - button [ref=e25] [cursor=pointer]:
+            - img "Google 徽标" [ref=e28]
+            - text: 使用 Google 账户继续
+          - button [ref=e35] [cursor=pointer]:
+            - img "Apple 徽标" [ref=e38]
+            - text: 使用 Apple 账户继续
+          - button [ref=e43] [cursor=pointer]:
+            - img "Microsoft 徽标" [ref=e46]
+            - text: 使用 Microsoft 账户继续
+          - button [ref=e52] [cursor=pointer]
+  - generic [ref=e57]:
+    - link "使用条款" [ref=e58] [cursor=pointer]:
+      - /url: https://openai.com/policies/terms-of-use
+    - generic [ref=e59]: "|"
+    - link "隐私政策" [ref=e60] [cursor=pointer]:
+      - /url: https://openai.com/policies/privacy-policy
